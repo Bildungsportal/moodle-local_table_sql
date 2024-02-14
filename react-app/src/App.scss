@@ -1,0 +1,20 @@
+.MuiTablePagination-root {
+  // abstand von pagination control verringern
+  margin-top: 0 !important;
+}
+.MuiTableContainer-root {
+  td:first-child,
+  th:first-child {
+    padding-left: 20px !important;
+  }
+}
+
+table.has-sticky-action-menu {
+  th:last-child,
+  td:last-child {
+    position: sticky;
+    right: 0;
+    box-shadow: -5px 0 5px -5px #ddd; /* Shadow-like effect for the left border */
+    box-shadow: -1px 2px 4px 2px #ddd;
+  }
+}
