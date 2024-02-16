@@ -1,0 +1,4 @@
+phpDocumentor.phar
+.*
+!.gitignore
+!.dev
