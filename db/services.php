@@ -16,23 +16,19 @@
 
 /**
  * @package    local_table_sql
- * @copyright  2022 Austrian Federal Ministry of Education
+ * @copyright  2023 Austrian Federal Ministry of Education
  * @author     GTN solutions
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-$string['pluginname'] = 'Table Sql';
+defined('MOODLE_INTERNAL') || die;
 
-$string['download_all'] = 'Tabellendaten herunterladen als';
-$string['download_filtered'] = '{$a} gefilterte Einträge herunterladen als';
-$string['download_selected'] = '{$a} ausgewählte Einträge herunterladen als';
-
-$string['exception:key_value_change_prohibited'] = 'Changing a key value is prohibited!';
-
-$string['num_rows_selected'] = '{$a} Zeile(n) ausgewählt!';
-
-$string['loading'] = 'Lade...';
-$string['loading_error'] = 'Fehler beim Laden...';
-
-$string['select_all_rows_on_all_pages'] = 'Alle Zeilen auf allen Seiten auswählen';
-$string['select_none'] = 'Auswahl aufheben';
+$functions = array(
+    'local_table_sql_receiver' => array(
+        'classname' => '\local_table_sql\receiver',
+        'description' => 'Store table_sql form data using ajax.',
+        'methodname' => 'receive',
+        'type' => 'write',
+        'ajax' => 1,
+    ),
+);

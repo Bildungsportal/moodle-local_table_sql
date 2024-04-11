@@ -77,7 +77,12 @@ class log_table extends \local_table_sql\table_sql {
         $this->sortable(true, 'timecreated', SORT_DESC);
 
         $this->set_column_options('timecreated', data_type: 'timestamp');
-        $this->set_column_options('widgetid', visible: false);
+        $this->set_column_options('widgetid', internal: true);
+
+        $this->column_style('timecreated', 'background', 'red');
+        $this->column_class('setto', 'setto-test');
+
+        // $this->enable_row_selection();
 
         $this->pagesize = 8;
 
@@ -92,12 +97,29 @@ class log_table extends \local_table_sql\table_sql {
             label: 'Test',
         );
 
+        // $this->set_row_actions_js_callback("function({ row, row_actions }){
+        //     // console.log('callback');
+        //     return row_actions;
+        // }");
+
+        // $this->set_render_detail_panel_js_callback("function({ row }){
+        //     // return '<div style=\"font-weight: bold; background: red\">dfdsfdfd123</div>';
+        //     return '/fffdsfsd';
+        // }");
+
+        $this->enable_detail_panel();
+
         $this->set_row_actions_display_as_menu(true);
-        // $this->enable_row_selection = true;
+
+        $this->enable_page_size_selector(false);
+        $this->set_initial_page_index(1);
     }
 
     public function col_setto($row) {
-        return $row->setto ? get_string('enable') : get_string('disable');
+        return $this->format_col_content(
+            $row->setto ? get_string('enable') : get_string('disable'),
+            link: '/test'
+        );
     }
 
     public function col_interface_or_widget($log) {
@@ -122,6 +144,10 @@ class log_table extends \local_table_sql\table_sql {
         }
     }
 
+    protected function render_detail_panel_content(object $row) {
+        return $row->id;
+    }
+
     public function col_approval($row) {
         if ($row->approvalmaintainer) {
             return get_string('maintainer', 'local_eduportal');
@@ -129,6 +155,11 @@ class log_table extends \local_table_sql\table_sql {
         if ($row->approvalpartner) {
             return get_string('partner', 'local_eduportal');
         }
+    }
+
+    protected function get_row_actions(object $row, array $row_actions): ?array {
+        $row_actions[1]->disabled = true;
+        return $row_actions;
     }
 }
 

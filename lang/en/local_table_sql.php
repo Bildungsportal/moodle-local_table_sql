@@ -22,11 +22,21 @@
  */
 
 $string['pluginname'] = 'Table Sql';
-$string['loading'] = 'Loading...';
-$string['loading_error'] = 'Error while Loading...';
-$string['select_all_rows_on_all_pages'] = 'Select all rows on all pages';
-$string['select_none'] = 'Select none';
-$string['num_rows_selected'] = '{$a} row(s) selected!';
+
+$string['cachedef_applicaton'] = 'General purpose application cache';
+$string['cachedef_request'] = 'General purpose request cache';
+$string['cachedef_session'] = 'General purpose session cache';
+
 $string['download_all'] = 'Download table data as';
 $string['download_filtered'] = 'Download {$a} filtered rows as';
 $string['download_selected'] = 'Download {$a} row(s) as';
+
+$string['exception:key_value_change_prohibited'] = 'Changing a key value is prohibited!';
+
+$string['num_rows_selected'] = '{$a} row(s) selected!';
+
+$string['loading'] = 'Loading...';
+$string['loading_error'] = 'Error while Loading...';
+
+$string['select_all_rows_on_all_pages'] = 'Select all rows on all pages';
+$string['select_none'] = 'Select none';

@@ -14,7 +14,35 @@ table.has-sticky-action-menu {
   td:last-child {
     position: sticky;
     right: 0;
-    box-shadow: -5px 0 5px -5px #ddd; /* Shadow-like effect for the left border */
-    box-shadow: -1px 2px 4px 2px #ddd;
+
+    // ALT: border links mit box-shadow
+    //   box-shadow: -5px 0 5px -5px #ddd; /* Shadow-like effect for the left border */
+    //   box-shadow: -1px 2px 4px 2px #ddd;
+
+    // NEU: border links mit :before
+    &:before {
+      // background-color: rgba(252, 252, 252, 0.97);
+      content: '';
+      height: 100%;
+      left: 0;
+      position: absolute;
+      top: 0;
+      width: 100%;
+      z-index: -1;
+      box-shadow: 4px 0 4px -4px rgba(97, 97, 97, 0.5) inset;
+    }
   }
+
+  // bei sticky action menu + selection den background-Style hier definieren, damit im Hintergrund nicht die anderen Spalten durchschauen
+  tr.Mui-selected td:last-child {
+    background-color: #ddeaf8 !important;
+  }
+  tr.Mui-selected:hover td:last-child {
+    background-color: #bad6f2 !important;
+  }
+}
+
+.menu-item:focus {
+  // disable border for a-tags in menü
+  outline-width: 0;
 }

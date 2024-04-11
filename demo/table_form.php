@@ -16,23 +16,23 @@
 
 /**
  * @package    local_table_sql
- * @copyright  2022 Austrian Federal Ministry of Education
+ * @copyright  2024 Austrian Federal Ministry of Education
  * @author     GTN solutions
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-$string['pluginname'] = 'Table Sql';
+require_once('../../../config.php');
 
-$string['download_all'] = 'Tabellendaten herunterladen als';
-$string['download_filtered'] = '{$a} gefilterte Einträge herunterladen als';
-$string['download_selected'] = '{$a} ausgewählte Einträge herunterladen als';
+use local_table_sql\demo\demo_table_form;
 
-$string['exception:key_value_change_prohibited'] = 'Changing a key value is prohibited!';
+$PAGE->set_url('/local/table_sql/demo/form_table.php', []);
+$PAGE->set_context(\context_system::instance());
+$PAGE->set_title("Demo for table_sql_form");
+$PAGE->set_heading("Demo for table_sql_form");
 
-$string['num_rows_selected'] = '{$a} Zeile(n) ausgewählt!';
+require_admin();
 
-$string['loading'] = 'Lade...';
-$string['loading_error'] = 'Fehler beim Laden...';
-
-$string['select_all_rows_on_all_pages'] = 'Alle Zeilen auf allen Seiten auswählen';
-$string['select_none'] = 'Auswahl aufheben';
+$table = new demo_table_form();
+echo $OUTPUT->header();
+$table->out();
+echo $OUTPUT->footer();

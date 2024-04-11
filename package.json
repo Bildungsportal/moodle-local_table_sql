@@ -1,0 +1,8 @@
+{
+    "name": "moodle-local_table_sql",
+    "eslintConfig": {
+        "rules": {
+            "no-console": "off"
+        }
+    }
+}

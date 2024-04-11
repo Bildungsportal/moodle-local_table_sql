@@ -16,8 +16,11 @@ export const useAppConfig = () => {
     // set index
     tableConfig.columns.forEach((column, index) => (column.index = index));
 
-    if (tableConfig.row_actions_callback) {
-      tableConfig.row_actions_callback = stringToFunction(tableConfig.row_actions_callback);
+    if (tableConfig.row_actions_js_callback) {
+      tableConfig.row_actions_js_callback = stringToFunction(tableConfig.row_actions_js_callback);
+    }
+    if (tableConfig.render_detail_panel_js_callback) {
+      tableConfig.render_detail_panel_js_callback = stringToFunction(tableConfig.render_detail_panel_js_callback);
     }
 
     return tableConfig;

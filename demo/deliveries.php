@@ -232,7 +232,7 @@ class delivery_table extends \local_table_sql\table_sql {
         //$this->define_headers(array_values($filterHeader));
 
         $this->set_column_options('status_string', sql_column: 'delivery.status');
-        $this->set_column_options('status', hidden: true, no_filter: true);
+        $this->set_column_options('status', internal: true);
 
         // $this->no_sorting('file');
         // $this->no_filter('file');

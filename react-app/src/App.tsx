@@ -7,13 +7,15 @@ import {
   MRT_RowSelectionState,
   type MRT_ColumnDef,
   type MRT_ColumnFiltersState,
-  type MRT_FilterFnsState,
+  type MRT_ColumnFilterFnsState,
   type MRT_PaginationState,
   type MRT_SortingState,
   MRT_TopToolbar,
   MRT_VisibilityState,
+  useMaterialReactTable,
+  MRT_Row,
 } from 'material-react-table';
-import { MenuItem, Box, IconButton, Button, Alert, Collapse, Paper } from '@mui/material';
+import { MenuItem, Box, IconButton, Button, Alert, Collapse, Paper, CircularProgress, Stack } from '@mui/material';
 import { Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import './App.scss';
@@ -45,7 +47,6 @@ function useShowStickyColumns(tableConfig) {
   const check = useMemo(
     () =>
       debounce(() => {
-        console.log('check');
         // Function to check if the div has a horizontal scrollbar
         const div = tableConfig.containerElement.querySelector('.MuiTableContainer-root');
         if (div) {
@@ -75,28 +76,72 @@ function useShowStickyColumns(tableConfig) {
 
 type TData = any;
 
+const DetailPanel = ({ row }: { row: MRT_Row<TData> }) => {
+  const tableConfig = useAppConfig();
+
+  // https://www.material-react-table.com/docs/examples/lazy-detail-panel
+
+  // const {
+  //   data: userInfo,
+  //   isLoading,
+  //   isError,
+  // } = useFetchUserInfo(
+  //   {
+  //     phoneNumber: row.id, //the row id is set to the user's phone number
+  //   },
+  //   {
+  //     enabled: row.getIsExpanded(),
+  //   },
+  // );
+  // if (isLoading) return <CircularProgress />;
+  // if (isError) return <Alert severity="error">Error Loading User Info</Alert>;
+
+  // const { favoriteMusic, favoriteSong, quote } = userInfo ?? {};
+
+  let content = '';
+  if (tableConfig.render_detail_panel_js_callback) {
+    content = tableConfig.render_detail_panel_js_callback({ row });
+  } else {
+    content = row.original._data.detail_panel_content;
+  }
+
+  return (
+    <Stack gap="0.5rem" minHeight="0px">
+      <div dangerouslySetInnerHTML={{ __html: content }} />
+    </Stack>
+  );
+};
+
 const App = (props) => {
   const fetchWithParams = useFetchWithParams();
 
   const tableConfig = useAppConfig();
 
-  const tableConfigError = false;
+  // const tableConfigError = false;
 
   const [columnFilters, setColumnFilters] = useState<MRT_ColumnFiltersState>([]);
-  const [columnFilterFns, setColumnFilterFns] = useState<MRT_FilterFnsState>([] as any);
+  const [columnFilterFns, setColumnFilterFns] = useState<MRT_ColumnFilterFnsState>([] as any);
   const [globalFilter, setGlobalFilter] = useState('');
-  const [sorting, setSorting] = useState<MRT_SortingState>([]);
+  const [sorting, setSorting] = useState<MRT_SortingState>([
+    {
+      id: tableConfig.sort_default_column,
+      desc: tableConfig.sort_default_order == 'desc',
+    },
+  ]);
   const [columnVisibility, setColumnVisibility] = useState<MRT_VisibilityState>({});
-  const setColumnVisibilityByUser = (cb) => {
+  const setColumnVisibilityByUser = (callbackOrState) => {
     setColumnVisibility((old) => {
-      const newState = cb(old);
+      const newState = typeof callbackOrState == 'function' ? callbackOrState(old) : callbackOrState;
+
+      // remmeber last state in sessionStorage
       sessionStorage.setItem('local_table_sql-' + tableConfig.uniqueid + '-' + 'columnVisibility', JSON.stringify(newState));
+
       return newState;
     });
   };
   const [pagination, setPagination] = useState<MRT_PaginationState>({
-    pageIndex: 0,
-    pageSize: 10,
+    pageIndex: tableConfig.initial_page_index,
+    pageSize: tableConfig.pagesize,
   });
   const [showTable, setShowTable] = useState(false);
   const [selectedRowsCount, setSelectedRowsCount] = useState(0);
@@ -104,19 +149,8 @@ const App = (props) => {
   const localization = useLocalization();
   const { getString } = localization;
 
-  // Check Table config loaded
   useEffect(() => {
-    if (!tableConfig) {
-      return;
-    }
-
-    setPagination({ ...pagination, pageSize: tableConfig.pagesize });
-    setSorting([
-      {
-        id: tableConfig.sort_default_column,
-        desc: tableConfig.sort_default_order == 'desc',
-      },
-    ]);
+    // initial actions
 
     // set all columns to filter "contains"
     const columnFilterFns = {};
@@ -142,7 +176,7 @@ const App = (props) => {
     }
 
     setShowTable(true);
-  }, [tableConfig]);
+  }, []);
 
   function getColumn(key) {
     return tableConfig?.columns?.filter((column) => column.key == key)[0];
@@ -184,7 +218,7 @@ const App = (props) => {
     refetch: refetchList,
   } = useQuery({
     queryKey: ['table-data', JSON.stringify(fetchListParams)],
-    enabled: !!tableConfig && showTable,
+    enabled: showTable,
     queryFn: async () => {
       const result = await fetchWithParams(fetchListParams);
 
@@ -214,12 +248,14 @@ const App = (props) => {
     refetchOnWindowFocus: false,
     keepPreviousData: true,
     retry: process.env.NODE_ENV === 'development' ? 0 : 3,
+    // don't check network connection, directly try to start loading
+    networkMode: 'always',
   });
 
   const rows = data?.data;
 
   // events
-  React.useEffect(() => {
+  useEffect(() => {
     // @ts-ignore
     document.addEventListener('local_table_sql:reload', refetchList);
 
@@ -232,46 +268,43 @@ const App = (props) => {
   const showStickyColumns = useShowStickyColumns(tableConfig);
 
   // update download form
-  useEffect(
-    function () {
-      const filtersAndSorting = { ...fetchListParams } as any;
-      delete filtersAndSorting.page;
-      delete filtersAndSorting.page_size;
+  useEffect(() => {
+    const filtersAndSorting = { ...fetchListParams } as any;
+    delete filtersAndSorting.page;
+    delete filtersAndSorting.page_size;
 
-      const downloadUrl = new URL(window.location.href);
+    const downloadUrl = new URL(window.location.href);
 
-      // Add the parameters from the object to the URL object
-      for (const [key, value] of Object.entries(filtersAndSorting)) {
-        downloadUrl.searchParams.set(key, value as any);
+    // Add the parameters from the object to the URL object
+    for (const [key, value] of Object.entries(filtersAndSorting)) {
+      downloadUrl.searchParams.set(key, value as any);
+    }
+
+    // Get the updated URL as a string
+    const newURL = downloadUrl.toString();
+
+    tableConfig.containerElement.querySelectorAll('.table-sql-download-form-container form').forEach(function (form) {
+      // Formular auf post umstellen (ist normal get) und die parameter in die action mit der neuen url inkl. Filter überschreiben
+      form.method = 'post';
+      form.action = newURL;
+
+      var label = form.querySelector('label[for="downloadtype_download"]');
+      if (label) {
+        if (selectedRowsCount > 0) {
+          label.innerHTML = getString('download_selected', selectedRowsCount);
+        } else if (filtersAndSorting.s?.trim() || (filtersAndSorting.filters && filtersAndSorting.filters != '[]')) {
+          label.innerHTML = getString('download_filtered', data?.meta?.total);
+        } else {
+          label.innerHTML = getString('download_all');
+        }
       }
 
-      // Get the updated URL as a string
-      const newURL = downloadUrl.toString();
-
-      tableConfig.containerElement.querySelectorAll('.table-sql-download-form-container form').forEach(function (form) {
-        // Formular auf post umstellen (ist normal get) und die parameter in die action mit der neuen url inkl. Filter überschreiben
-        form.method = 'post';
-        form.action = newURL;
-
-        var label = form.querySelector('label[for="downloadtype_download"]');
-        if (label) {
-          if (selectedRowsCount > 0) {
-            label.innerHTML = getString('download_selected', selectedRowsCount);
-          } else if (filtersAndSorting.s?.trim() || (filtersAndSorting.filters && filtersAndSorting.filters != '[]')) {
-            label.innerHTML = getString('download_filtered', data?.meta?.total);
-          } else {
-            label.innerHTML = getString('download_all');
-          }
-        }
-
-        const submitButton = form.querySelector('button[type="submit"]');
-        if (submitButton) {
-          submitButton.disabled = data?.meta?.total == 0;
-        }
-      });
-    },
-    [JSON.stringify(fetchListParams), selectedRowsCount, data]
-  );
+      const submitButton = form.querySelector('button[type="submit"]');
+      if (submitButton) {
+        submitButton.disabled = data?.meta?.total == 0;
+      }
+    });
+  }, [JSON.stringify(fetchListParams), selectedRowsCount, data]);
 
   // Check data loaded
   useEffect(() => {
@@ -358,6 +391,7 @@ const App = (props) => {
                     <a
                       href={href || '#'}
                       target={target}
+                      style={{display: 'block'}}
                       onClick={(e) => {
                         // prevent selection
                         e.stopPropagation();
@@ -459,41 +493,35 @@ const App = (props) => {
   }, [tableConfig]);
 
   const rowsPerPageOptions = useMemo(() => {
-    let pageSizes = [10, 20, 50, 100];
-
-    if (!tableConfig?.pagesize) {
-      // config not yet loaded
-      return pageSizes;
+    if (tableConfig.enable_page_size_selector === false) {
+      // no selection allowed
+      // in v1: If less than two options are available, no select field will be displayed.
+      // for v2: this needs to behandled differently
+      return [tableConfig.pagesize];
     }
 
-    const defaultPageSize = parseInt(tableConfig.pagesize);
+    let pageSizes = [10, 20, 50, 100];
+
+    const defaultPageSize = tableConfig.pagesize;
     if (pageSizes.includes(defaultPageSize)) {
       return pageSizes;
     } else {
       pageSizes.push(defaultPageSize);
       return pageSizes.sort((a, b) => a - b);
     }
-  }, [pagination.pageSize]);
+  }, [pagination.pageSize, tableConfig.enable_page_size_selector]);
 
   const [rowSelection, setRowSelection] = useState<MRT_RowSelectionState>({});
 
-  if (tableConfigError) {
-    return (
-      <Paper>
-        <div style={{ minHeight: 200, padding: 20 }}>
-          {getString('loading_error')} {(tableConfigError as any)?.error ? '(' + (tableConfigError as any)?.error + ')' : ''}
-        </div>
-      </Paper>
-    );
-  }
-
-  if (!showTable) {
-    return (
-      <Paper>
-        <div style={{ minHeight: 200, padding: 20 }}>{getString('loading')}</div>
-      </Paper>
-    );
-  }
+  // if (tableConfigError) {
+  //   return (
+  //     <Paper>
+  //       <div style={{ minHeight: 200, padding: 20 }}>
+  //         {getString('loading_error')} {(tableConfigError as any)?.error ? '(' + (tableConfigError as any)?.error + ')' : ''}
+  //       </div>
+  //     </Paper>
+  //   );
+  // }
 
   const editColumn = getColumn('edit');
   const deleteColumn = getColumn('delete');
@@ -508,14 +536,26 @@ const App = (props) => {
   let renderRowActions: any = undefined;
   let renderRowActionMenuItems: any = undefined;
 
-  if (tableConfig.row_actions?.length || tableConfig.row_actions_callback) {
+  if (tableConfig.row_actions?.length || tableConfig.row_actions_js_callback) {
     const getRowActions = ({ row }) => {
-      if (tableConfig.row_actions_callback) {
-        return tableConfig.row_actions_callback({ row: row.original, row_actions: deepClone(tableConfig.row_actions) }) || [];
-        // return produce({ row, row_actions: tableConfig.row_actions }, (globalState_hack.row_actions_callback) || [];
+      let row_actions: any[];
+
+      if (row.original._data.row_actions) {
+        // reconstruct the full row_action object from the partial row.row_actions
+        row_actions = row.original._data.row_actions;
+        row_actions = row_actions.map((row_action) => {
+          const base_row_action = tableConfig.row_actions.find((base_row_action) => base_row_action.id == row_action.id);
+          return { ...base_row_action, ...row_action };
+        });
       } else {
-        return tableConfig.row_actions;
+        row_actions = deepClone(tableConfig.row_actions);
       }
+
+      if (tableConfig.row_actions_js_callback) {
+        row_actions = tableConfig.row_actions_js_callback({ row: row.original, row_actions }) || [];
+      }
+
+      return row_actions;
     };
 
     const getRowActionProps = (row, action) => {
@@ -584,15 +624,18 @@ const App = (props) => {
           const icon = renderActionIcon(action);
 
           return (
-            <a key={i} {...getRowActionProps(row, action)} style={{ color: 'inherit', textDecoration: 'none' }}>
-              <MenuItem
-                disabled={action.disabled}
-                // disableGutters={true}
-              >
-                {!!icon && <span style={{ marginRight: 5 }}>{icon}</span>}
-                {action.label}
-              </MenuItem>
-            </a>
+            <MenuItem
+              {...getRowActionProps(row, action)}
+              key={i}
+              disabled={action.disabled}
+              component="a"
+              className="menu-item"
+              // style={{ color: 'inherit', textDecoration: 'none' }}
+              // disableGutters={true}
+            >
+              {!!icon && <span style={{ marginRight: 5 }}>{icon}</span>}
+              {action.label}
+            </MenuItem>
           );
         });
     } else {
@@ -622,221 +665,254 @@ const App = (props) => {
 
   const enableRowActions = editColumn || deleteColumn || tableConfig.row_actions?.length;
 
-  return (
-    <>
-      <MaterialReactTable
-        columns={columns}
-        data={data?.data ?? []} //data is undefined on first render
-        positionPagination="both"
-        enableSortingRemoval={false} // man kann nicht in einen "unsortierten" Zustand wechseln
-        initialState={{
-          // only in dev start with filters visible
-          showColumnFilters: false, // process.env.NODE_ENV == 'development',
-          density: 'compact',
-        }}
-        muiTablePaginationProps={{
-          rowsPerPageOptions,
-        }}
-        enableDensityToggle={false}
-        enableGlobalFilter={tableConfig.enable_global_filter || false}
-        enableRowActions={enableRowActions}
-        // You can modify the default column widths by setting the defaultColumn prop on the table.
-        defaultColumn={{
-          minSize: 10, //allow columns to get smaller than default
-          maxSize: 9001, //allow columns to get larger than default
-          size: 10, //make columns wider by default
-        }}
-        // https://codesandbox.io/p/sandbox/github/KevinVandy/material-react-table/tree/main/apps/material-react-table-docs/examples/customize-filter-modes/sandbox?file=%2Fsrc%2FJS.js%3A55%2C7-55%2C30
-        enableColumnFilterModes
-        positionActionsColumn="last"
-        renderRowActions={renderRowActions}
-        renderRowActionMenuItems={renderRowActionMenuItems}
-        manualFiltering
-        manualPagination
-        manualSorting
-        // muiToolbarAlertBannerProps={
-        //   isError
-        //     ? {
-        //         color: 'error',
-        //         children: 'Error loading data',
-        //       }
-        //     : undefined
-        // }
-        onColumnFiltersChange={setColumnFilters}
-        onColumnFilterFnsChange={setColumnFilterFns}
-        onGlobalFilterChange={setGlobalFilter}
-        onPaginationChange={setPagination}
-        onSortingChange={setSorting}
-        onColumnVisibilityChange={setColumnVisibilityByUser}
-        renderTopToolbarCustomActions={() => (
-          <div></div>
-          // <Tooltip arrow title="Refresh Data">
-          //   <IconButton onClick={() => refetchList()}>
-          //     <RefreshIcon />
-          //   </IconButton>
-          // </Tooltip>
-        )}
-        rowCount={data?.meta?.total ?? 0}
-        state={{
-          columnFilters,
-          columnFilterFns,
-          columnVisibility,
-          globalFilter,
-          isLoading,
-          pagination,
-          showAlertBanner: isError,
-          showProgressBars: isFetching,
-          sorting,
-          rowSelection,
-        }}
-        muiTableBodyProps={{
-          sx: {
-            //stripe the rows, make odd rows a darker color
-            '& tr:nth-of-type(odd):not(.Mui-selected)': {
-              backgroundColor: '#f9f9f9',
-            },
-          },
-        }}
-        muiTableProps={{
-          className: showStickyColumns && enableRowActions && tableConfig.row_actions_display_as_menu ? 'has-sticky-action-menu' : '',
-        }}
-        // disable "5 von 26 Zeile(n) ausgewählt"
-        positionToolbarAlertBanner="none"
-        renderTopToolbar={({ table }) => {
-          const infoText =
-            selectedRowsCount > 0 ? (
-              <>
-                {getString('num_rows_selected', selectedRowsCount)}
-                <Button
-                  variant="outlined"
-                  style={{ textTransform: 'none', minWidth: 0, marginLeft: 10, padding: '0 4px', borderColor: '#777', color: 'inherit' }}
-                  onClick={async () => {
-                    const ret = await fetchWithParams({
-                      ...fetchListParams,
-                      table_sql_action: 'select_all',
-                    });
+  const cellProps = ({ column }) => {
+    let userStyles = getColumn(column.id)?.style || undefined;
+    if (userStyles) {
+      userStyles = convertSnakeCaseToCamelCase(userStyles);
+    }
 
-                    refetchList();
-                    setSelectedRowsCount(ret?.meta?.selected_rows_count);
-                  }}
-                >
-                  {getString('select_all_rows_on_all_pages')}
-                </Button>
-                <Button
-                  variant="outlined"
-                  style={{ textTransform: 'none', minWidth: 0, marginLeft: 10, padding: '0 4px', borderColor: '#777', color: 'inherit' }}
-                  onClick={async () => {
-                    const ret = await fetchWithParams({
-                      ...fetchListParams,
-                      table_sql_action: 'select_none',
-                    });
+    let className = `local_table_sql-column-${column.id}`;
+    if (getColumn(column.id)?.class) {
+      className += ' ' + getColumn(column.id)?.class;
+    }
 
-                    refetchList();
-                    setSelectedRowsCount(0);
-                  }}
-                >
-                  {getString('select_none')}
-                </Button>
-              </>
-            ) : (
-              ''
-            );
+    return {
+      style: {
+        ...userStyles,
+      },
+      className,
+    };
+  };
 
-          const errorText = !!loadDataError && ((loadDataError as any)?.error || getString('loading_error'));
+  // const hasStickyActionMenu = enableRowActions && tableConfig.row_actions_display_as_menu; // && showStickyColumns;
 
-          return (
-            <>
-              <Collapse in={!!infoText || !!errorText} timeout={200}>
-                {!!errorText && (
-                  <Alert severity="error" icon={false}>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{errorText}</div>
-                  </Alert>
-                )}
-                {!!infoText && (
-                  <Alert severity="info" icon={false}>
-                    {infoText}
-                  </Alert>
-                )}
-              </Collapse>
-              <MRT_TopToolbar table={table} />
-            </>
-          );
-        }}
-        enableRowSelection={tableConfig.enable_row_selection}
-        enableMultiRowSelection={tableConfig.enable_row_selection}
-        enableSelectAll={tableConfig.enable_row_selection}
-        localization={localization.reactTable}
-        onRowSelectionChange={async (mutator) => {
-          // actually first parameter should be the new values, but is a mutator function?!?
-          const oldValues = rowSelection;
+  const table = useMaterialReactTable({
+    columns,
+    data: data?.data ?? [], //data is undefined on first render
+    positionPagination: 'both',
+    enableSortingRemoval: false, // man kann nicht in einen "unsortierten" Zustand wechseln
+    initialState: {
+      // only in dev start with filters visible
+      showColumnFilters: false, // process.env.NODE_ENV == 'development',
+      density: 'compact',
+      // columnPinning: hasStickyActionMenu ? { right: ['mrt-row-actions'] } : {},
+    },
+    // enablePinning: hasStickyActionMenu,
+    muiPaginationProps: {
+      rowsPerPageOptions,
+      showRowsPerPage: tableConfig.enable_page_size_selector !== false,
+    },
+    enableDensityToggle: false,
+    enableGlobalFilter: tableConfig.enable_global_filter,
+    enableFilters: tableConfig.enable_column_filters,
+    enableRowActions,
+    // You can modify the default column widths by setting the defaultColumn prop on the table.
+    defaultColumn: {
+      minSize: 10, //allow columns to get smaller than default
+      maxSize: 9001, //allow columns to get larger than default
+      size: 10, //make columns wider by default
+    },
+    // https://codesandbox.io/p/sandbox/github/KevinVandy/material-react-table/tree/main/apps/material-react-table-docs/examples/customize-filter-modes/sandbox?file=%2Fsrc%2FJS.js%3A55%2C7-55%2C30
+    enableColumnFilterModes: true,
+    positionActionsColumn: 'last',
+    renderRowActions: renderRowActions,
+    renderRowActionMenuItems: renderRowActionMenuItems,
+    manualFiltering: true,
+    manualPagination: true,
+    manualSorting: true,
+    // muiToolbarAlertBannerProps={
+    //   isError
+    //     ? {
+    //         color: 'error',
+    //         children: 'Error loading data',
+    //       }
+    //     : undefined
+    // }
+    onColumnFiltersChange: setColumnFilters,
+    onColumnFilterFnsChange: setColumnFilterFns,
+    onGlobalFilterChange: setGlobalFilter,
+    onPaginationChange: setPagination,
+    onSortingChange: setSorting,
+    onColumnVisibilityChange: setColumnVisibilityByUser,
+    renderTopToolbarCustomActions: () => (
+      <div></div>
+      // <Tooltip arrow title="Refresh Data">
+      //   <IconButton onClick={() => refetchList()}>
+      //     <RefreshIcon />
+      //   </IconButton>
+      // </Tooltip>
+    ),
+    renderDetailPanel: tableConfig.enable_detail_panel ? ({ row }) => <DetailPanel row={row} /> : undefined,
+    rowCount: data?.meta?.total ?? 0,
+    state: {
+      columnFilters,
+      columnFilterFns,
+      columnVisibility,
+      globalFilter,
+      isLoading,
+      pagination,
+      showAlertBanner: isError,
+      showProgressBars: isFetching,
+      sorting,
+      rowSelection,
+    },
+    muiTableBodyProps: {
+      sx: {
+        //stripe the rows, make odd rows a darker color
+        '& tr:nth-of-type(odd):not(.Mui-selected)': {
+          backgroundColor: '#f9f9f9',
+        },
+      },
+    },
+    muiTableProps: {
+      // alternative zu has-sticky-action-menu wäre columnPinning+enablePinning
+      className: showStickyColumns && enableRowActions && tableConfig.row_actions_display_as_menu ? 'has-sticky-action-menu' : '',
+    },
+    // disable "5 von 26 Zeile(n) ausgewählt"
+    positionToolbarAlertBanner: 'none',
+    renderTopToolbar: ({ table }) => {
+      const infoText =
+        selectedRowsCount > 0 ? (
+          <>
+            {getString('num_rows_selected', selectedRowsCount)}
+            <Button
+              variant="outlined"
+              style={{ textTransform: 'none', minWidth: 0, marginLeft: 10, padding: '0 4px', borderColor: '#777', color: 'inherit' }}
+              onClick={async () => {
+                const ret = await fetchWithParams({
+                  ...fetchListParams,
+                  table_sql_action: 'select_all',
+                });
 
-          // @ts-ignore
-          const newValues = mutator(rowSelection);
+                refetchList();
+                setSelectedRowsCount(ret?.meta?.selected_rows_count);
+              }}
+            >
+              {getString('select_all_rows_on_all_pages')}
+            </Button>
+            <Button
+              variant="outlined"
+              style={{ textTransform: 'none', minWidth: 0, marginLeft: 10, padding: '0 4px', borderColor: '#777', color: 'inherit' }}
+              onClick={async () => {
+                const ret = await fetchWithParams({
+                  ...fetchListParams,
+                  table_sql_action: 'select_none',
+                });
 
-          const row_ids_selected = [] as any[];
-          const row_ids_unselected = [] as any[];
+                refetchList();
+                setSelectedRowsCount(0);
+              }}
+            >
+              {getString('select_none')}
+            </Button>
+          </>
+        ) : (
+          ''
+        );
 
-          rows?.map((row) => {
-            const row_id = getRowId(row);
-            if (newValues[row_id] && !oldValues[row_id]) {
-              row_ids_selected.push(row_id);
+      const errorText = !!loadDataError && ((loadDataError as any)?.error || getString('loading_error'));
 
-              // hack: update cached value
-              // wenn die während die liste erneut geladen wird (z.B. bei seiten-navigation), soll bereits der geänderte wert angezeigt werden
-              row._data.selected = true;
-            } else if (oldValues[row_id] && !newValues[row_id]) {
-              row_ids_unselected.push(row_id);
+      return (
+        <>
+          <Collapse in={!!infoText || !!errorText} timeout={200}>
+            {!!errorText && (
+              <Alert severity="error" icon={false}>
+                <div style={{ whiteSpace: 'pre-wrap' }}>{errorText}</div>
+              </Alert>
+            )}
+            {!!infoText && (
+              <Alert severity="info" icon={false}>
+                {infoText}
+              </Alert>
+            )}
+          </Collapse>
+          <MRT_TopToolbar table={table} />
+        </>
+      );
+    },
+    enableRowSelection: tableConfig.enable_row_selection,
+    enableMultiRowSelection: tableConfig.enable_row_selection,
+    enableSelectAll: tableConfig.enable_row_selection,
+    localization: localization.reactTable,
+    onRowSelectionChange: async (mutator) => {
+      // actually first parameter should be the new values, but is a mutator function?!?
+      const oldValues = rowSelection;
 
-              // hack: update cached value
-              // wenn die während die liste erneut geladen wird (z.B. bei seiten-navigation), soll bereits der geänderte wert angezeigt werden
-              row._data.selected = false;
-            }
-          });
+      // @ts-ignore
+      const newValues = mutator(rowSelection);
 
-          setRowSelection(newValues);
+      const row_ids_selected = [] as any[];
+      const row_ids_unselected = [] as any[];
 
-          const ret = await fetchWithParams({
-            table_sql_action: 'set_selected',
-            row_ids_selected,
-            row_ids_unselected,
-          });
+      rows?.map((row) => {
+        const row_id = getRowId(row);
+        if (newValues[row_id] && !oldValues[row_id]) {
+          row_ids_selected.push(row_id);
 
-          setSelectedRowsCount(ret?.meta?.selected_rows_count);
-        }}
-        // renderColumnFilterModeMenuItems={() => <div>item3</div>}
-        // components={{
-        //   FilterRow: (props) => <div>Filter</div>,
-        // }}
-        muiSelectCheckboxProps={({ row }) => ({
-          name: tableConfig.uniqueid + '[]',
-          value: getRowId(row.original),
-        })}
-        getRowId={tableConfig.enable_row_selection ? (originalRow) => getRowId(originalRow) : undefined}
-        muiTableBodyRowProps={
-          tableConfig.enable_row_selection
-            ? ({ row }) => ({
-                onClick: row.getToggleSelectedHandler(),
-                sx: {
-                  cursor: 'pointer',
-                },
-              })
-            : undefined
+          // hack: update cached value
+          // wenn die während die liste erneut geladen wird (z.B. bei seiten-navigation), soll bereits der geänderte wert angezeigt werden
+          row._data.selected = true;
+        } else if (oldValues[row_id] && !newValues[row_id]) {
+          row_ids_unselected.push(row_id);
+
+          // hack: update cached value
+          // wenn die während die liste erneut geladen wird (z.B. bei seiten-navigation), soll bereits der geänderte wert angezeigt werden
+          row._data.selected = false;
         }
-        muiTableBodyCellProps={({ column }) => {
-          let userStyles = getColumn(column.id)?.style || undefined;
-          if (userStyles) {
-            userStyles = convertSnakeCaseToCamelCase(userStyles);
-          }
+      });
 
-          return {
-            style: {
-              ...userStyles,
-            },
-          };
-        }}
-      />
-    </>
-  );
+      setRowSelection(newValues);
+
+      const ret = await fetchWithParams({
+        table_sql_action: 'set_selected',
+        row_ids_selected,
+        row_ids_unselected,
+      });
+
+      setSelectedRowsCount(ret?.meta?.selected_rows_count);
+    },
+    // renderColumnFilterModeMenuItems={() => <div>item3</div>}
+    // components={{
+    //   FilterRow: (props) => <div>Filter</div>,
+    // }}
+    muiSelectCheckboxProps: ({ row }) => ({
+      name: tableConfig.uniqueid + '[]',
+      value: getRowId(row.original),
+    }),
+    getRowId: tableConfig.enable_row_selection ? (originalRow) => getRowId(originalRow) : undefined,
+    muiTableBodyRowProps: ({ row }) => {
+      let props = {
+        sx: {},
+      } as any;
+
+      if (tableConfig.enable_row_selection) {
+        props.onClick = row.getToggleSelectedHandler();
+        props.sx.cursor = 'pointer';
+      } else if (tableConfig.enable_detail_panel) {
+        // geht nicht:
+        // props.onClick = row.getToggleExpandedHandler();
+        // geht:
+        props.onClick = function (e) {
+          e.target.closest('tr').querySelector('td.local_table_sql-column-mrt-row-expand button')?.click();
+        };
+        props.sx.cursor = 'pointer';
+      }
+
+      return props;
+    },
+    muiTableHeadCellProps: cellProps,
+    muiTableBodyCellProps: cellProps,
+  });
+
+  if (!showTable) {
+    return (
+      <Paper>
+        <div style={{ minHeight: 200, padding: 20 }}>{getString('loading')}</div>
+      </Paper>
+    );
+  } else {
+    return <MaterialReactTable table={table} />;
+  }
 };
 
 export default App;

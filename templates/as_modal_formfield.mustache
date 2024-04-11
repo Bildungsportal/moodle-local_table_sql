@@ -1,0 +1,39 @@
+{{!
+   This file is part of Moodle - http://moodle.org/
+
+   Moodle is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
+
+   Moodle is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+ }}
+
+
+<div class="fitem table-sql-modal" id="table-sql-{{fingerprint}}" data-formid="{{formid}}" data-title="{{showtitle}}" data-label="{{label}}" data-fields="{{fields}}" style="overflow: hidden; text-overflow: ellipsis;">
+    <a href="#" class="{{btnclass}}" onclick="var a = this; require(['local_table_sql/form'], function(f) { f.loadModal(a, '{{formid}}'); }); return false;"
+       style="float: left; margin-right: 5px;">
+        <i class="{{icon}}"></i>
+        <span class="{{btnlabelclass}} {{#btnlabelisvalue}}table-sql-modal-value{{/btnlabelisvalue}}"
+              {{#btnlabelisvalue}}data-col="{{col}}"{{/btnlabelisvalue}}>
+            {{{btnlabel}}}
+        </span>
+    </a>
+    {{^btnlabelisvalue}}
+    <div class="table-sql-modal-value" data-col="{{col}}">{{{showvalue}}}</div>
+    {{/btnlabelisvalue}}
+    <div class="table-sql-modal-rowids hidden">
+        {{#rowids}}
+            <div class="dataset" data-field="{{field}}">{{{value}}}</div>
+        {{/rowids}}
+    </div>
+    <span id="id_error_{{name}}" class="form-control-feedback invalid-feedback" style="display: block;">
+        {{{error}}}
+    </span>
+</div>

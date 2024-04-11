@@ -105,7 +105,7 @@ if (process.env.NODE_ENV == 'development') {
       ],
       row_actions_display_as_menu: true,
       enable_global_filter: true,
-      row_actions_callback: '(function({ row, row_actions }){\n                  row_actions[0].disabled = true;\n                  return row_actions;\n                })',
+      row_actions_js_callback: '(function({ row, row_actions }){\n                  row_actions[0].disabled = true;\n                  return row_actions;\n                })',
     });
   }
 }
