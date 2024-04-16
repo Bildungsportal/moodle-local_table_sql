@@ -23,6 +23,8 @@
 
 $string['pluginname'] = 'Table Sql';
 
+$string['privacy:metadata'] = 'No personal data is stored with this plugin.';
+
 $string['cachedef_applicaton'] = 'General purpose application cache';
 $string['cachedef_request'] = 'General purpose request cache';
 $string['cachedef_session'] = 'General purpose session cache';

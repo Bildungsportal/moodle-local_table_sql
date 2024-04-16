@@ -4,6 +4,6 @@ function local_table_sql_form_action(fingerprint, formid) {
         console.error('No table-sql-modal for fingerprint found', fingerprint);
     }
     require(['local_table_sql/form'], function (f) {
-        f.rowAction(sender, formid);
+        f.loadModal(sender, formid);
     });
 }

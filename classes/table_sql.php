@@ -170,12 +170,13 @@ class table_sql extends moodle_table_sql {
 
     /**
      * Add a single header.
-     * @param $header
-     * @return void
      */
-    function define_header($header) {
-        if (empty($this->headers)) $this->define_headers([$header]);
-        else $this->headers[] = $header;
+    function define_header(string $header): void {
+        if (empty($this->headers)) {
+            $this->define_headers([$header]);
+        } else {
+            $this->headers[] = $header;
+        }
     }
 
     /**
@@ -688,7 +689,9 @@ class table_sql extends moodle_table_sql {
             'url' => $url,
             'type' => $type,
             'label' => $label,
-            'id' => $id ?: 'action-' . (count($this->row_actions) + 1),
+            // dies erlaubt auch numerische ids, welche zu string convertiert werden
+            // und erlaubt auch eine id '0'
+            'id' => $id === '' ? 'action-' . (count($this->row_actions) + 1) : $id,
             'disabled' => $disabled,
             'icon' => $icon,
             'onclick' => $onclick,

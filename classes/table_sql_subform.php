@@ -76,7 +76,10 @@ abstract class table_sql_subform extends moodleform {
             $_POST[$field] = $value;
         }
         if (!empty($rowdata->formdata)) {
-            foreach ($rowdata->formdata as $field => $value) {
+            //foreach ($rowdata->formdata as $field => $value) {
+            foreach ($rowdata->formdata as $data) {
+                $field = $data->name;
+                $value = $data->value;
                 $matches_unnamed = [];
                 $matches_named = [];
                 // Unnamed arrays

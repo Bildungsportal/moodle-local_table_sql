@@ -2,7 +2,7 @@ define(
     ['jquery', 'core/ajax', 'core/modal_factory', 'core/modal_events', 'core/notification'],
     function ($, Ajax, ModalFactory, ModalEvents, Notification){
         return {
-            debug: true,
+            debug: false,
             /**
              * load the form into a modal by use of ajax.
              * @param {DOMobject} sender
@@ -65,19 +65,6 @@ define(
                 }]);
             },
             /**
-             * Add a modal control for a row and trigger calling the form.
-             * @param {DOMObject} sender
-             * @param {string} formid
-             */
-            rowAction: function(sender, formid) {
-                let SELF = this;
-                let cell = $(sender).closest('td');
-                if (cell.find('[data-formid="' + formid + '"]').length == 0) {
-                    $(cell).append(modalcontrol);
-                }
-                SELF.loadModal(sender, formid);
-            },
-            /**
              * Update modal if a form was loaded into it.
              * @param {object} params
              * @param {object} modal
@@ -130,15 +117,7 @@ define(
                 let SELF = this;
                 let sendparams = params;
                 let form = $(modal.getRoot()).find('form');
-                let formdata = Object.fromEntries(new FormData(form[0]).entries());
-                if (SELF.debug) {
-                    console.log('Sending', formdata);
-                }
-                sendparams['formdata'] = { 'submitbutton': 1 };
-                Object.keys(formdata).forEach(function(key) {
-                    sendparams['formdata'][key] = formdata[key];
-                });
-
+                sendparams['formdata'] = $(form).serializeArray();
                 if (SELF.debug) {
                     console.log('Store row', sendparams);
                 }
