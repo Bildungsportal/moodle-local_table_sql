@@ -36,8 +36,6 @@ require_once($CFG->libdir . '/tablelib.php');
 
 class table_sql extends moodle_table_sql {
 
-    // private $enable_edit = false;
-    // private $enable_delete = false;
     private bool $enable_row_selection = false;
 
     private ?bool $enable_global_filter = null;
@@ -64,6 +62,13 @@ class table_sql extends moodle_table_sql {
 
     var $showdownloadbuttonsat = [TABLE_P_BOTTOM];
     private string $download_name = '';
+
+    const PARAM_TEXT = 'text';
+    const PARAM_NUMBER = 'number';
+    const PARAM_TIMESTAMP = 'timestamp';
+    const PARAM_UNKNOWN = 'unknown';
+
+    private $datetime_format = '%d.%m.%Y %H:%M';
 
     public function __construct($uniqueid = null) {
         global $PAGE;
@@ -121,17 +126,6 @@ class table_sql extends moodle_table_sql {
                 $this->sort_default_order = SORT_DESC;
             }
         }
-
-        // Das geht so nicht mehr, weil die spalte ja auch im select drinnen sein kann
-        // columns, which don't existing, can not be sorted:
-        // if (@$this->sql->from) {
-        //     $dbman = $DB->get_manager();
-        //     foreach ($this->columns as $column => $tmp) {
-        //         if (!$dbman->field_exists(trim($this->sql->from, '{}'), $column)) {
-        //             $this->no_sorting($column);
-        //         }
-        //     }
-        // }
 
         // move delete closer to edit button
         if (@$this->columns['edit'] && @$this->columns['delete']) {
@@ -192,31 +186,6 @@ class table_sql extends moodle_table_sql {
         $this->define_headers(array_values($cols));
     }
 
-    // public function set_column_options(array $columns) {
-    //     foreach ($columns as $column => $options) {
-    //         if (!isset($this->columns[$column])) {
-    //             throw new \moodle_exception("column $column not found");
-    //         }
-    //
-    //         // check
-    //         foreach ($options as $option => $value) {
-    //             if ($option == 'select_options') {
-    //                 if (!is_array($value)) {
-    //                     throw new \moodle_exception('selected_options must be an array');
-    //                 }
-    //             } elseif ($option == 'sql_column') {
-    //                 if (!is_string($value)) {
-    //                     throw new \moodle_exception('sql_column must be a string');
-    //                 }
-    //             } else {
-    //                 throw new \moodle_exception("column_option {$option} unknown");
-    //             }
-    //         }
-    //
-    //         $this->column_options[$column] = array_merge($this->column_options[$column] ?? [], $options);
-    //     }
-    // }
-
     protected function set_column_options($column, string $sql_column = null, array $select_options = null, string $data_type = null, bool $hidden = null, bool $visible = null, bool $internal = null, bool $no_filter = null, bool $no_sorting = null, string $onclick = null) {
         global $CFG;
 
@@ -235,8 +204,8 @@ class table_sql extends moodle_table_sql {
             $this->column_options[$column]['sql_column'] = $sql_column;
         }
         if ($data_type !== null) {
-            if (!in_array($data_type, ['number', 'string', 'timestamp'])) {
-                throw new \moodle_exception("data_type {$data_type} is unknown");
+            if (!in_array($data_type, [static::PARAM_NUMBER, static::PARAM_TEXT, static::PARAM_TIMESTAMP])) {
+                throw new \moodle_exception("data_type {$data_type} is unknown, use the PARAM_* constants!");
             }
             $this->column_options[$column]['data_type'] = $data_type;
         }
@@ -402,41 +371,53 @@ class table_sql extends moodle_table_sql {
         return $sql;
     }
 
-    protected function sql_format_timestamp(string $column, $format = '%d.%m.%Y %H:%i:%s') {
+    protected function sql_format_timestamp(string $column, $format = '') {
         global $DB;
 
-        if ($DB instanceof pgsql_native_moodle_database) {
+        if (!$format) {
+            $format = $this->datetime_format;
+        }
+
+        if ($DB instanceof \pgsql_native_moodle_database) {
             // postgres:
 
             // convert to postgres format
-            $format = preg_replace_callback('!%[a-z]!i', function($matches) {
-                // https://www.w3schools.com/sql/func_mysql_date_format.asp
-                // https://www.postgresqltutorial.com/postgresql-string-functions/postgresql-to_char/
-                if ($matches[0] == '%Y') {
-                    return 'YYYY';
-                } elseif ($matches[0] == '%d') {
-                    return 'DD';
-                } elseif ($matches[0] == '%m') {
-                    return 'MM';
-                } elseif ($matches[0] == '%H') {
-                    return 'HH24';
-                } elseif ($matches[0] == '%i') {
-                    return 'MI';
-                } elseif ($matches[0] == '%s') {
-                    return 'SS';
-                } elseif ($matches[0] == '%w') {
-                    // TODO: postgres sunday is 1, mysql sunday is 0!
-                    return 'D';
-                } else {
-                    throw new dml_exception('unknown date format: ' . $matches[0]);
-                }
-            }, $format);
+            $substitutions = [
+                '%Y' => 'YYYY',
+                '%d' => 'DD',
+                '%m' => 'MM',
+                '%H' => 'HH24',
+                '%M' => 'MI',
+                '%s' => 'SS',
+                '%w' => 'D', // TODO: postgres sunday is 1, mysql sunday is 0!
+            ];
+            $format = strtr($format, $substitutions);
 
-            return "TO_CHAR(TO_TIMESTAMP({$column}), '{$format}')";
+            if (strpos($format, '%') !== false) {
+                throw new dml_exception('date format contains unknown identifiers: ' . $format);
+            }
+
+            $timezone = str_replace(['"', '\''], '', get_user_timezone());
+            return "TO_CHAR(TO_TIMESTAMP({$column}) AT TIME ZONE '{$timezone}', '{$format}')";
+        } else {
+            // mysql:
+
+            $substitutions = [
+                '%M' => '%i', // %M is used as Minute in php, but month in mysql?!?
+            ];
+            $format = strtr($format, $substitutions);
+
+            static $mysql_timezone = null;
+            if ($mysql_timezone === null) {
+                $mysql_timezone = $DB->get_field_sql('SELECT @@global.time_zone');
+            }
+
+            // mysql:
+            $timezone = str_replace(['"', '\''], '', get_user_timezone());
+
+            // convert from mysql internal timezone to user timezone
+            return "DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME({$column}), '{$mysql_timezone}', '{$timezone}'), '{$format}')";
         }
-
-        // mysql:
-        return "DATE_FORMAT(FROM_UNIXTIME({$column}), '{$format}')";
     }
 
     private function _uniqueid(string $prefix = 'unique') {
@@ -507,7 +488,7 @@ class table_sql extends moodle_table_sql {
 
                 $sql_column = $this->get_sql_column($column);
                 // timestamp columns need to formated as a string, so it can be searched (eg. 08.02.2024)
-                if (($this->column_options[$column]['data_type'] ?? '') == 'timestamp') {
+                if (($this->column_options[$column]['data_type'] ?? '') == static::PARAM_TIMESTAMP) {
                     $sql_column = $this->sql_format_timestamp($sql_column);
                 }
 
@@ -562,15 +543,21 @@ class table_sql extends moodle_table_sql {
         };
 
         foreach ($filters as $filter) {
-            if (!array_key_exists($filter->id, $this->columns)) {
+            $column = $filter->id;
+
+            if (!array_key_exists($column, $this->columns)) {
                 continue;
             }
 
-            if (in_array($filter->id, $this->column_nofilter)) {
+            if (in_array($column, $this->column_nofilter)) {
                 continue;
             }
 
-            $sql_column = $this->get_sql_column($filter->id);
+            $sql_column = $this->get_sql_column($column);
+
+            if (($this->column_options[$column]['data_type'] ?? '') == static::PARAM_TIMESTAMP) {
+                $sql_column = $this->sql_format_timestamp($sql_column);
+            }
 
             if (empty($filter->fn) || $filter->fn == 'contains') {
                 if ($filter->value) {
@@ -582,7 +569,7 @@ class table_sql extends moodle_table_sql {
                     } else {
                         // text suche
                         $filter_where[] = $DB->sql_like($DB->sql_cast_to_char($sql_column), $get_param_name(), false, false);
-                        $params[$get_param_key()] = '%' . $DB->sql_like_escape($filter->value) . '%';
+                        $params[$get_param_key()] = '%' . preg_replace('!\s+!', '%', $DB->sql_like_escape($filter->value)) . '%';
                     }
                 }
             } elseif ($filter->fn == 'equals') {
@@ -644,16 +631,16 @@ class table_sql extends moodle_table_sql {
         }
 
         // get sql_column from query
-        if (preg_match('!(^|[\s,])(?<column>[^.\s,]+\.[^.\s,]+)\s+as\s+?' . preg_quote($column, '!') . '([,\s]|$)!i', $this->sql->fields ?? '', $matches)) {
+        if (preg_match('!(^|[\s,()])(?<column>[^.\s,()]+\.[^.\s,]+)\s+as\s+?' . preg_quote($column, '!') . '([,\s]|$)!i', $this->sql->fields ?? '', $matches)) {
             // matches u.some_col AS username
             // matches u.some_col username
             $sql_column = $matches['column'];
-        } elseif (preg_match('!(^|[\s,])(?<column>[^.\s,]+\.' . preg_quote($column, '!') . ')([,\s]|$)!i', $this->sql->fields ?? '', $matches)) {
+        } elseif (preg_match('!(^|[\s,])(?<column>[^.\s,()]+\.' . preg_quote($column, '!') . ')([,\s]|$)!i', $this->sql->fields ?? '', $matches)) {
             // matches u.username
             $sql_column = $matches['column'];
         } else {
             // dont't allow brackets () in table name, because sql->from could be a select statement!
-            if (preg_match('!^[^\s()]+\s+(as\s+)?(?<table>[^\s,()]+)!i', $this->sql->from ?? '', $matches)) {
+            if (preg_match('!^[^\s,()]+\s+(as\s+)?(?<table>[^\s,()]+)!i', $this->sql->from ?? '', $matches)) {
                 // matches long_table AS short_table
                 // matches long_table short_table
                 $sql_column = $matches['table'] . '.' . $column;
@@ -672,8 +659,6 @@ class table_sql extends moodle_table_sql {
                 $url = new \moodle_url($this->baseurl, ['action' => 'edit', 'id' => '{id}']);
             } elseif ($type == 'delete') {
                 $url = new \moodle_url($this->baseurl, ['action' => 'delete', 'id' => '{id}']);
-            } else {
-                throw new \moodle_exception('url not specified in add_row_action()');
             }
         }
 
@@ -694,7 +679,7 @@ class table_sql extends moodle_table_sql {
             'id' => $id === '' ? 'action-' . (count($this->row_actions) + 1) : $id,
             'disabled' => $disabled,
             'icon' => $icon,
-            'onclick' => $onclick,
+            'onclick' => trim($onclick),
         ];
     }
 
@@ -811,43 +796,11 @@ class table_sql extends moodle_table_sql {
         $where = $this->sql->where;
         $params = $this->sql->params;
 
-        $param_type = $this->get_sql_param_type_from_param_array($this->sql->params);
-        [$filter_where, $filter_params] = $this->get_filter_where($param_type);
-        $params = array_merge($params, $filter_params);
-
         $sql = "
             SELECT {$select}
             FROM {$this->sql->from}
-            WHERE {$where} AND {$filter_where}
+            WHERE {$where}
         ";
-
-        // echo $sql."\n\n";
-
-        // if ($filter_where) {
-        //     if ($select == 'COUNT(1)') {
-        //         $subSelect = @$this->sql->fields ?: "*";
-        //     } else {
-        //         $subSelect = $select;
-        //         $select = '*';
-        //     }
-        //     $sql = "SELECT {$select}" .
-        //         " FROM (" .
-        //         "SELECT {$subSelect} FROM {$this->sql->from}" .
-        //         ($where ? " WHERE {$where}" : "") .
-        //         ") sub" .
-        //         " WHERE " . '(' . join(' AND ', $filter_where) . ')' .
-        //         $order_by;
-        //     echo $sql . "\n";
-        // } else {
-        //     $sql = "SELECT {$select}" .
-        //         " FROM {$this->sql->from}" .
-        //         ($where ? " WHERE {$where}" : "") .
-        //         $order_by;
-        // }
-
-        // echo $sql;
-        // var_dump($params);
-        // exit;
 
         return [$sql, $params];
     }
@@ -928,41 +881,13 @@ class table_sql extends moodle_table_sql {
         }
     }
 
-    // public function col_edit($row): string {
-    //     $url = $this->get_edit_url($row);
-    //     $title = get_string('edit');
-    //
-    //     if ($this->is_xhr) {
-    //         return is_object($url) ? $url->out(false) : $url;
-    //     } else {
-    //         return "<a href='{$url}' style='display: block; margin: -0.25rem; padding: 0.25rem'><i class='fa fa-edit'></i><span class='sr-only'>" . s($title) . "</span></a>";
-    //     }
-    // }
-    //
-    // public function col_delete($row): string {
-    //     $url = $this->get_delete_url($row);
-    //     $title = get_string('delete');
-    //
-    //     if ($this->is_xhr) {
-    //         return is_object($url) ? $url->out(false) : $url;
-    //     } else {
-    //         return "<a href='{$url}' style='display: block; margin: -0.25rem; padding: 0.25rem'><i class='fa fa-remove'></i><span class='sr-only'>" . s($title) . "</span></a>";
-    //     }
-    // }
-    //
-    // protected function get_edit_url($row): moodle_url {
-    //     global $PAGE;
-    //     return new moodle_url($PAGE->url, ['action' => 'edit', 'id' => $row->id]);
-    // }
-    //
-    // protected function get_delete_url($row): moodle_url {
-    //     global $PAGE;
-    //     return new moodle_url($PAGE->url, ['action' => 'delete', 'id' => $row->id]);
-    // }
-
     public function other_cols($column, $row) {
-        if (preg_match('!^time!', $column)) {
-            return userdate($row->{$column});
+        if (($this->column_options[$column]['data_type'] ?? '') == static::PARAM_TIMESTAMP) {
+            return $this->format_timestamp($row->{$column});
+        }
+
+        if (preg_match('!^time!', $column) && ctype_digit((string)$row->{$column})) {
+            return $this->format_timestamp($row->{$column});
         }
 
         if (empty($this->column_options[$column]['internal']) && (!$this->is_downloading() || $this->export_class_instance()->supports_html())) {
@@ -971,6 +896,10 @@ class table_sql extends moodle_table_sql {
         } else {
             return $row->{$column};
         }
+    }
+
+    protected function format_timestamp($timestamp) {
+        return userdate($timestamp, $this->datetime_format, 99, false);
     }
 
     public function out_actions() {
@@ -1041,12 +970,6 @@ class table_sql extends moodle_table_sql {
                 ), is_siteadmin() ? JSON_PRETTY_PRINT : 0) . ")");
         }
 
-        // Render button to allow user to reset table preferences.
-        // echo $this->render_reset_button();
-
-        // Do we need to print initial bars?
-        // $this->print_initials_bar();
-
         echo '<div id="' . $this->htmluniqueid() . '">';
         if (in_array(TABLE_P_TOP, $this->showdownloadbuttonsat)) {
             echo $this->download_buttons();
@@ -1064,22 +987,6 @@ class table_sql extends moodle_table_sql {
 
         echo '</div>';
     }
-
-    // public function outHtml($pagesize = null, $useinitialsbar = null, $downloadhelpbutton = '') {
-    //     global $PAGE;
-    //
-    //     // headers get changed when calling ::out(), so save it here for later
-    //     // $headers = $this->headers;
-    //
-    //     $this->_out($pagesize, $useinitialsbar, $downloadhelpbutton);
-    //
-    //     // restore headers
-    //     // $this->headers = $headers;
-    //
-    //     $PAGE->requires->js_call_amd('local_eduportal/table_sql', 'init', ['uniqueid' => $this->uniqueid]);
-    //
-    //     // echo '<pre>' . json_encode($this->get_config(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . '</pre>';
-    // }
 
     private function _out() {
         parent::out($this->pagesize, null, '');
@@ -1114,11 +1021,7 @@ class table_sql extends moodle_table_sql {
                 'header' => $headers[$num],
                 'data_type' => $data_type,
                 'sorting' => $this->is_sortable && !in_array($column, $this->column_nosort) && !in_array($column, ['edit', 'delete']),
-                'filter' => !in_array($column, $this->column_nofilter) && !in_array($column, ['edit', 'delete'])
-                    // aktuell kann noch nicht nach datum (timestamp) gefiltert werden
-                    // TODO: Kalender in die App integrieren
-                    && $data_type != 'timestamp',
-
+                'filter' => !in_array($column, $this->column_nofilter) && !in_array($column, ['edit', 'delete']),
                 'internal' => $this->column_options[$column]['internal'] ?? false,
                 'visible' => $this->column_options[$column]['visible'] ?? true,
                 'onclick' => $this->column_options[$column]['onclick'] ?? null,
@@ -1232,11 +1135,11 @@ class table_sql extends moodle_table_sql {
 
         if (!$columns) {
             // table was not found
-            return 'unknown';
+            return static::PARAM_UNKNOWN;
         }
         if (empty($columns[$column])) {
             // column was not found
-            return 'unknown';
+            return static::PARAM_UNKNOWN;
         }
 
         $type = $columns[$column]->type;
@@ -1318,15 +1221,7 @@ class table_sql extends moodle_table_sql {
                 $this->currpage = 0;
                 $this->pagesize = 999999;
 
-                // query_db() berücksichtigt auch die filter
-                // => select_all bedeutet, dass alle vom aktuellen Filter ausgewählt werden
-
                 $this->query_db(999999, false);
-
-                // da query_db() eigentlich zwei queries macht (count + select *), könnte man das auch so machen:
-                // allerdings falls query_db() in einer child klasse überschrieben wird, dann wird das nicht mehr aufgerufen!
-                // [$sql, $params] = $this->get_sql_and_params();
-                // $rows = $DB->get_records_sql($sql, $params);
 
                 $session_info = $this->get_session_info();
 
@@ -1361,12 +1256,6 @@ class table_sql extends moodle_table_sql {
 
             $this->pagesize = optional_param('page_size', 0, PARAM_INT) ?: $this->pagesize;
 
-            // $export_class = new table_sql_xhr();
-            // $this->export_class_instance($export_class);
-            // // $export_class->start_document();
-            // $this->out();
-            // $rows = $export_class->rows;
-
             $this->_out();
             $rows = $this->xhr_formatted_data;
 
@@ -1378,10 +1267,6 @@ class table_sql extends moodle_table_sql {
 
             // fix rows
             foreach ($rows as $row_i => &$row) {
-                // change row to be indexed by key
-                // not needed anymore, row is already index by key via add_data_keyed()
-                // $row = array_combine(array_keys($this->columns), $row);
-
                 $originalRow = $rawdata[$row_i];
 
                 foreach ($row as &$col_value) {
@@ -1457,6 +1342,11 @@ class table_sql extends moodle_table_sql {
                             // replace encoded placeholders '{id}'
                             $action->url = preg_replace('!%7B([a-z0-9_]+)%7D!i', '{$1}', $action->url);
                         }
+
+                        if (!empty($action->onclick)) {
+                            $action->onclick = trim($action->onclick);
+                        }
+
                         return $action;
                     }, $row_actions);
 
@@ -1493,26 +1383,6 @@ class table_sql extends moodle_table_sql {
             }
         }
     }
-
-    // /**
-    //  * Format the time cell.
-    //  *
-    //  * @param \stdClass $row
-    //  * @return  string
-    //  */
-    // public function col_time($row): string {
-    //     return format_time($row->time);
-    // }
-    //
-    // /**
-    //  * Format the timestarted cell.
-    //  *
-    //  * @param \stdClass $row
-    //  * @return  string
-    //  */
-    // public function col_timestarted($row): string {
-    //     return userdate($row->timestarted);
-    // }
 
     private function get_session_info() {
         if (empty($_SESSION['local_table_sql_info'])) {

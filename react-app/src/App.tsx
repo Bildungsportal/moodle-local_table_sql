@@ -217,7 +217,11 @@ const App = (props) => {
     isRefetching,
     refetch: refetchList,
   } = useQuery({
-    queryKey: ['table-data', JSON.stringify(fetchListParams)],
+    queryKey: [
+      'table-data',
+      tableConfig.uniqueid, // add uniqueid, in case the table_sql is displayed multiple times at the page, the query results get shared by useQuery
+      JSON.stringify(fetchListParams),
+    ],
     enabled: showTable,
     queryFn: async () => {
       const result = await fetchWithParams(fetchListParams);
@@ -391,7 +395,7 @@ const App = (props) => {
                     <a
                       href={href || '#'}
                       target={target}
-                      style={{display: 'block'}}
+                      style={{ display: 'block' }}
                       onClick={(e) => {
                         // prevent selection
                         e.stopPropagation();
@@ -572,12 +576,10 @@ const App = (props) => {
       if (action.onclick) {
         return {
           onClick: (e) => {
-            const ret = stringToFunction(action.onclick)(e);
+            const ret = stringToFunction(action.onclick)(e, row);
 
-            if (ret === false || e.isPropagationStopped()) {
-              if (url) {
-                document.location.href = url;
-              }
+            if (ret !== false && !e.isPropagationStopped() && url) {
+              document.location.href = url;
             }
           },
         };

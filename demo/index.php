@@ -76,7 +76,7 @@ class log_table extends \local_table_sql\table_sql {
 
         $this->sortable(true, 'timecreated', SORT_DESC);
 
-        $this->set_column_options('timecreated', data_type: 'timestamp');
+        $this->set_column_options('timecreated', data_type: static::PARAM_TIMESTAMP);
         $this->set_column_options('widgetid', internal: true);
 
         $this->column_style('timecreated', 'background', 'red');
