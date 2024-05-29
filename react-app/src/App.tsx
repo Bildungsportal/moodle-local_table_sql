@@ -562,7 +562,7 @@ const App = (props) => {
       return row_actions;
     };
 
-    const getRowActionProps = (row, action) => {
+    const getRowActionProps = (row, action, closeMenu) => {
       if (action.disabled) {
         return {};
       }
@@ -573,32 +573,41 @@ const App = (props) => {
       }
 
       // in moodle onclick is named lowercase!
-      if (action.onclick) {
-        return {
-          onClick: (e) => {
-            const ret = stringToFunction(action.onclick)(e, row);
+      // if (action.onclick) {
+      //   return {
+      //     onClick: (e) => {
+      //       const ret = stringToFunction(action.onclick)(e, row);
 
-            if (ret !== false && !e.isPropagationStopped() && url) {
-              document.location.href = url;
-            }
-          },
-        };
-      }
+      //       closeMenu?.();
+      //     },
+      //   };
+      // }
 
       if (action.type == 'delete') {
         url += '&confirm=1';
 
         return {
-          onClick: () => {
-            if (window.confirm('Wirklick löschen?')) {
-              document.location.href = url;
-            }
-          },
+          href: url,
+          onClick: () => window.confirm('Wirklick löschen?'),
         };
       }
 
       return {
         href: url || undefined,
+        onClick: (e) => {
+          let ret = null;
+          if (action.onclick) {
+            ret = stringToFunction(action.onclick)(e, row);
+          }
+
+          if (ret === false) {
+            // weiterleitung zum href verhindern
+            e.preventDefault();
+            // "return ret" funktioniert nicht?
+          }
+
+          closeMenu?.();
+        },
       };
     };
 
@@ -621,13 +630,13 @@ const App = (props) => {
 
     if (tableConfig.row_actions_display_as_menu) {
       // als dropdown anzeigen
-      renderRowActionMenuItems = ({ row }) =>
+      renderRowActionMenuItems = ({ closeMenu, row }) =>
         getRowActions({ row }).map((action, i) => {
           const icon = renderActionIcon(action);
 
           return (
             <MenuItem
-              {...getRowActionProps(row, action)}
+              {...getRowActionProps(row, action, closeMenu)}
               key={i}
               disabled={action.disabled}
               component="a"
@@ -649,7 +658,7 @@ const App = (props) => {
             const icon = renderActionIcon(action);
 
             return (
-              <a key={i} {...getRowActionProps(row, action)} style={{ color: 'inherit' }}>
+              <a key={i} {...getRowActionProps(row, action, null)} style={{ color: 'inherit' }}>
                 {icon ? (
                   <IconButton disabled={action.disabled}>{icon}</IconButton>
                 ) : (

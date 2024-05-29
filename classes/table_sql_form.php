@@ -35,8 +35,6 @@ require_once("$CFG->libdir/tablelib.php");
  */
 
 abstract class table_sql_form extends table_sql {
-    static protected array $caches = [];
-
     protected array $forms = []; // Holds subforms of this table.
     protected array $forms_actions = []; // Data for form actions.
     protected array $formnames = []; // Headings of modals, human readable form names.
@@ -201,7 +199,7 @@ abstract class table_sql_form extends table_sql {
      * @return string
      */
     public function get_table_js_init(): string {
-        return "start_table_sql(" . json_encode(array_merge([
+        return "table_sql_start(" . json_encode(array_merge([
                 '__info' => is_siteadmin() ? 'Pretty print is only for admin!' : '',
                 'container' => '#' . $this->htmluniqueid(),
             ], (array)$this->get_config()

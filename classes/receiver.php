@@ -32,7 +32,7 @@ defined('MOODLE_INTERNAL') || die;
 
 require_once("$CFG->libdir/tablelib.php");
 
-class receiver extends external_api {
+class receiver extends \external_api {
     public static function receive_parameters() {
         return new external_function_parameters([
             'rowdata' => new external_value(PARAM_RAW, 'Row as JSON'),

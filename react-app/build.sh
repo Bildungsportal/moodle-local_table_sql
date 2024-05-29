@@ -3,7 +3,8 @@
 npm run build
 
 cat build/static/js/main.*.js build/static/js/*.chunk.js > ../js/main.js
-cat build/static/css/*.css > ../style/main.css
+
+(echo "/* stylelint-disable */" && cat build/static/css/*.css) > ../style/main.min.css
 
 cat build/static/js/*.LICENSE.txt > ../LICENSE.js.txt
 

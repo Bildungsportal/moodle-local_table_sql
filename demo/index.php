@@ -93,8 +93,17 @@ class log_table extends \local_table_sql\table_sql {
             type: 'delete'
         );
         $this->add_row_action(
-            $_SERVER['REQUEST_URI'],
-            label: 'Test',
+            '/',
+            label: 'Test Link',
+        );
+        $this->add_row_action(
+            label: 'Test Onlclick without link',
+            onclick: 'function(e,row){ console.log(e,row); }',
+        );
+        $this->add_row_action(
+            '/',
+            label: 'Test Onlclick with link',
+            onclick: 'function(e,row){ console.log(e,row); return confirm("weiter?"); }',
         );
 
         // $this->set_row_actions_js_callback("function({ row, row_actions }){

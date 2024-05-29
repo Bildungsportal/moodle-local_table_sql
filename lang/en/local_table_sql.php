@@ -25,10 +25,6 @@ $string['pluginname'] = 'Table Sql';
 
 $string['privacy:metadata'] = 'No personal data is stored with this plugin.';
 
-$string['cachedef_applicaton'] = 'General purpose application cache';
-$string['cachedef_request'] = 'General purpose request cache';
-$string['cachedef_session'] = 'General purpose session cache';
-
 $string['download_all'] = 'Download table data as';
 $string['download_filtered'] = 'Download {$a} filtered rows as';
 $string['download_selected'] = 'Download {$a} row(s) as';

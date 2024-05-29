@@ -9,7 +9,7 @@ import { fetchWithParams } from 'lib/helpers';
 
 const queryClient = new QueryClient();
 
-function start_table_sql(config) {
+function table_sql_start(config) {
   let { container } = config;
   let containerElement;
 
@@ -38,7 +38,10 @@ function start_table_sql(config) {
   );
 }
 
-(window as any).start_table_sql = start_table_sql;
+(window as any).table_sql_start = table_sql_start;
+(window as any).table_sql_reload = function(uniqueid){
+  document.dispatchEvent(new CustomEvent("local_table_sql:reload"));
+};
 
 if (process.env.NODE_ENV == 'development') {
   if (true) {
@@ -49,7 +52,7 @@ if (process.env.NODE_ENV == 'development') {
       });
 
       if (result && result.type == 'success') {
-        start_table_sql({
+        table_sql_start({
           container: '#table-sql-dev',
           ...result.data,
         });
@@ -59,7 +62,7 @@ if (process.env.NODE_ENV == 'development') {
       }
     })();
   } else {
-    start_table_sql({
+    table_sql_start({
       container: '#table-sql-dev',
       uniqueid: 'selecteddeliveries',
       pagesize: 8,

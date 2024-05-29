@@ -156,7 +156,7 @@ class table_sql extends moodle_table_sql {
         if ($PAGE->requires) {
             // For Typo3 Integration: in typo3 $PAGE->requires is not available
 
-            $PAGE->requires->css('/local/table_sql/style/main.css');
+            $PAGE->requires->css('/local/table_sql/style/main.min.css');
         }
 
         $this->out_actions();
@@ -962,7 +962,7 @@ class table_sql extends moodle_table_sql {
             $PAGE->requires->strings_for_js(array_keys($strings), 'local_table_sql');
 
             $PAGE->requires->js('/local/table_sql/js/main.js');
-            $PAGE->requires->js_init_code("start_table_sql(" . json_encode(array_merge([
+            $PAGE->requires->js_init_code("table_sql_start(" . json_encode(array_merge([
                     '__info' => is_siteadmin() ? 'Pretty print is only for admin!' : '',
                     'container' => '#' . $this->htmluniqueid(),
                 ], (array)$this->get_config()
