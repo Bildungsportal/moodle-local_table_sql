@@ -43,6 +43,7 @@ if ($_SERVER['HTTP_HOST'] != 'localhost') {
     require_admin();
 }
 
+namespace local_table_sql;
 class log_table extends \local_table_sql\table_sql {
     protected $appid;
 

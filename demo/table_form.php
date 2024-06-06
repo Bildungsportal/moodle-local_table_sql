@@ -23,7 +23,7 @@
 
 require_once('../../../config.php');
 
-use local_table_sql\demo\demo_table_form;
+use local_table_sql\local\demo\demo_table_form;
 
 $PAGE->set_url('/local/table_sql/demo/form_table.php', []);
 $PAGE->set_context(\context_system::instance());

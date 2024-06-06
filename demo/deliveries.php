@@ -48,6 +48,7 @@ if ($_SERVER['HTTP_HOST'] != 'localhost') {
 $org = \local_eduportal\api\org::get_org($orgid);
 $context = \context_coursecat::instance($org->categoryid);
 
+namespace local_table_sql;
 class delivery_table extends \local_table_sql\table_sql {
     protected $orgid;
     protected $filters;

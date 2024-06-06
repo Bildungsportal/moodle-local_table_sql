@@ -21,7 +21,7 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-namespace local_table_sql\demo;
+namespace local_table_sql\local\demo;
 
 use local_table_sql\table_sql_form;
 
@@ -53,7 +53,7 @@ class demo_table_form extends table_sql_form {
         $this->add_form(
             'demo',
             'Demo',
-            new \local_table_sql\demo\demo_form()
+            new \local_table_sql\local\demo\demo_form()
         );
         $this->add_form_action(
             formid: 'demo',
@@ -69,7 +69,7 @@ class demo_table_form extends table_sql_form {
             'demo', 'groupid',
             ['id' => $row->id],
             ['groupid'],
-            \local_table_sql\demo\demo_form::get_group($row->groupid)
+            \local_table_sql\local\demo\demo_form::get_group($row->groupid)
         );
     }
 
