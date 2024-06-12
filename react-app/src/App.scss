@@ -48,3 +48,23 @@ table.has-sticky-action-menu {
   // disable border for a-tags in menü
   outline-width: 0;
 }
+
+.text-center .Mui-TableHeadCell-Content {
+  justify-content: center;
+  transform: translateX(10px);
+}
+
+// filter input Text kleiner (gleich wie Tabelleninhalt)
+.MuiTableCell-head input[type='text'] {
+  font-size: 0.875rem;
+}
+.MuiTableCell-head .MuiSelect-multiple {
+  font-size: 0.875rem;
+}
+
+.multilineHeader-2 .Mui-TableHeadCell-Content {
+  min-height: 52px;
+}
+.multilineHeader-3 .Mui-TableHeadCell-Content {
+  min-height: 76px;
+}

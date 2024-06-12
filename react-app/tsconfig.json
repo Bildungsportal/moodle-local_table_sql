@@ -20,9 +20,9 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "jsxImportSource": "@emotion/react",
+//    "jsxImportSource": "@emotion/react",
     "noImplicitAny": false,
-    "types": ["@emotion/react/types/css-prop"]
+//    "types": ["@emotion/react/types/css-prop"]
   },
   "include": [
     "src"

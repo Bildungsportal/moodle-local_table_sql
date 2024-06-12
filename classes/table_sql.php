@@ -41,6 +41,7 @@ class table_sql extends moodle_table_sql {
     private ?bool $enable_global_filter = null;
     private ?bool $enable_column_filters = null;
     private bool $enable_page_size_selector = true;
+    private array $page_size_options = [];
     private int $initial_page_index = 0;
 
     // private bool $has_tile_view = false;
@@ -59,6 +60,8 @@ class table_sql extends moodle_table_sql {
     private array $xhr_formatted_data = [];
 
     private array $full_text_search_columns = [];
+
+    private array $mrt_options = [];
 
     var $showdownloadbuttonsat = [TABLE_P_BOTTOM];
     private string $download_name = '';
@@ -186,7 +189,7 @@ class table_sql extends moodle_table_sql {
         $this->define_headers(array_values($cols));
     }
 
-    protected function set_column_options($column, string $sql_column = null, array $select_options = null, string $data_type = null, bool $hidden = null, bool $visible = null, bool $internal = null, bool $no_filter = null, bool $no_sorting = null, string $onclick = null) {
+    protected function set_column_options($column, string $sql_column = null, array $select_options = null, string $data_type = null, bool $hidden = null, bool $visible = null, bool $internal = null, bool $no_filter = null, bool $no_sorting = null, string $onclick = null, array|object $mrt_options = null) {
         global $CFG;
 
         if (!isset($this->columns[$column])) {
@@ -243,8 +246,15 @@ class table_sql extends moodle_table_sql {
         if ($onclick !== null) {
             $this->column_options[$column]['onclick'] = $onclick;
         }
+
+        if ($mrt_options !== null) {
+            $this->column_options[$column]['mrt_options'] = $mrt_options;
+        }
     }
 
+    protected function set_mrt_options(array|object $mrt_options) {
+        $this->mrt_options = (array)$mrt_options;
+    }
 
     /**
      * Define table configs.
@@ -556,60 +566,66 @@ class table_sql extends moodle_table_sql {
             $sql_column = $this->get_sql_column($column);
 
             if (($this->column_options[$column]['data_type'] ?? '') == static::PARAM_TIMESTAMP) {
-                $sql_column = $this->sql_format_timestamp($sql_column);
+                $sql_column_as_char = $this->sql_format_timestamp($sql_column);
+            } else {
+                $sql_column_as_char = $sql_column;
             }
+
+            // just always use original column for now
+            // maybe this needs converting for char columns?
+            $sql_column_as_number = $sql_column;
 
             if (empty($filter->fn) || $filter->fn == 'contains') {
                 if ($filter->value) {
                     if (is_array($filter->value)) {
                         // list of possible values
                         list ($insql, $inparams) = $DB->get_in_or_equal($filter->value, $param_type, 'like_filter_' . str_replace('.', '', microtime(true)));
-                        $filter_where[] = $sql_column . ' ' . $insql;
+                        $filter_where[] = $sql_column_as_char . ' ' . $insql;
                         $params = array_merge($params, $inparams);
                     } else {
                         // text suche
-                        $filter_where[] = $DB->sql_like($DB->sql_cast_to_char($sql_column), $get_param_name(), false, false);
+                        $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
                         $params[$get_param_key()] = '%' . preg_replace('!\s+!', '%', $DB->sql_like_escape($filter->value)) . '%';
                     }
                 }
             } elseif ($filter->fn == 'equals') {
                 // case insensitive compare:
-                $filter_where[] = $DB->sql_like($DB->sql_cast_to_char($sql_column), $get_param_name(), false, false);
+                $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
                 $params[$get_param_key()] = $DB->sql_like_escape($filter->value);
             } elseif ($filter->fn == 'notEquals') {
                 // case insensitive compare
-                $filter_where[] = $DB->sql_like($DB->sql_cast_to_char($sql_column), $get_param_name(), false, false, true);
+                $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false, true);
                 $params[$get_param_key()] = $DB->sql_like_escape($filter->value);
             } elseif ($filter->fn == 'startsWith') {
                 // case insensitive compare
-                $filter_where[] = $DB->sql_like($sql_column, $get_param_name(), false, false);
+                $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
                 $params[$get_param_key()] = $DB->sql_like_escape($filter->value) . '%';
             } elseif ($filter->fn == 'endsWith') {
-                $filter_where[] = $DB->sql_like($sql_column, $get_param_name(), false, false);
+                $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
                 $params[$get_param_key()] = '%' . $DB->sql_like_escape($filter->value);
             } elseif ($filter->fn == 'greaterThan' && strlen($filter->value) > 0) {
-                $filter_where[] = $sql_column . " > " . $get_param_name();
+                $filter_where[] = $sql_column_as_number . " > " . $get_param_name();
                 $params[$get_param_key()] = (float)$filter->value;
             } elseif ($filter->fn == 'greaterThanOrEqualTo' && strlen($filter->value) > 0) {
-                $filter_where[] = $sql_column . " >= " . $get_param_name();
+                $filter_where[] = $sql_column_as_number . " >= " . $get_param_name();
                 $params[$get_param_key()] = (float)$filter->value;
             } elseif ($filter->fn == 'lessThan' && strlen($filter->value) > 0) {
-                $filter_where[] = $sql_column . " < " . $get_param_name();
+                $filter_where[] = $sql_column_as_number . " < " . $get_param_name();
                 $params[$get_param_key()] = (float)$filter->value;
             } elseif ($filter->fn == 'lessThanOrEqualTo' && strlen($filter->value) > 0) {
-                $filter_where[] = $sql_column . " <= " . $get_param_name();
+                $filter_where[] = $sql_column_as_number . " <= " . $get_param_name();
                 $params[$get_param_key()] = (float)$filter->value;
             } elseif ($filter->fn == 'empty') {
                 $filter_where[] = "COALESCE($sql_column, '') = ''";
             } elseif ($filter->fn == 'notEmpty') {
                 $filter_where[] = "COALESCE($sql_column, '') <> ''";
-            } elseif ($filter->fn == 'between') {
-                if (strlen($filter->value[0] ?: '') > 0) {
-                    $filter_where[] = $sql_column . " >= " . $get_param_name();
+            } elseif ($filter->fn == 'between' || $filter->fn == 'betweenInclusive') {
+                if (strlen($filter->value[0] ?? '') > 0) {
+                    $filter_where[] = $sql_column_as_number . " >= " . $get_param_name();
                     $params[$get_param_key()] = (float)$filter->value[0];
                 }
-                if (strlen($filter->value[1] ?: '') > 0) {
-                    $filter_where[] = $sql_column . " <= " . $get_param_name();
+                if (strlen($filter->value[1] ?? '') > 0) {
+                    $filter_where[] = $sql_column_as_number . " <= " . $get_param_name();
                     $params[$get_param_key()] = (float)$filter->value[1];
                 }
             } else {
@@ -714,6 +730,10 @@ class table_sql extends moodle_table_sql {
 
     protected function enable_page_size_selector(bool $enabled = true) {
         $this->enable_page_size_selector = $enabled;
+    }
+
+    protected function set_page_size_options(array $page_size_options) {
+        $this->page_size_options = $page_size_options;
     }
 
     protected function set_initial_page_index(int $page) {
@@ -1025,25 +1045,27 @@ class table_sql extends moodle_table_sql {
                 'internal' => $this->column_options[$column]['internal'] ?? false,
                 'visible' => $this->column_options[$column]['visible'] ?? true,
                 'onclick' => $this->column_options[$column]['onclick'] ?? null,
+                'mrtOptions' => (object)[],
             ];
 
             if (!empty($this->column_options[$column]['select_options'])) {
-                $columnConfig->filterVariant = 'multi-select';
+                $columnConfig->mrtOptions->filterVariant = 'multi-select';
 
-                $parse_select_options = function($select_options) {
-                    $result = [];
-                    foreach ($select_options as $key => $value) {
-                        if (is_scalar($value)) {
-                            $result[] = ['text' => $value, 'value' => $key];
-                        } else {
-                            $result[] = $value;
-                        }
+                $filterSelectOptions = [];
+                foreach ($this->column_options[$column]['select_options'] as $key => $value) {
+                    if (is_scalar($value)) {
+                        $filterSelectOptions[] = ['text' => $value, 'value' => $key];
+                    } else {
+                        $filterSelectOptions[] = $value;
                     }
-                    return $result;
-                };
+                }
 
-                $columnConfig->filterSelectOptions = $parse_select_options($this->column_options[$column]['select_options']);
-                $columnConfig->columnFilterModeOptions = [];
+                $columnConfig->mrtOptions->filterSelectOptions = $filterSelectOptions;
+                $columnConfig->mrtOptions->columnFilterModeOptions = [];
+            }
+
+            if ($this->column_options[$column]['mrt_options'] ?? false) {
+                $columnConfig->mrtOptions = (object)array_merge((array)$columnConfig->mrtOptions, (array)$this->column_options[$column]['mrt_options']);
             }
         }
 
@@ -1078,6 +1100,20 @@ class table_sql extends moodle_table_sql {
             return $column->filter;
         });
 
+        if (!$this->enable_page_size_selector) {
+            $page_size_options = [];
+        } elseif ($this->page_size_options) {
+            $page_size_options = $this->page_size_options;
+        } else {
+            $page_size_options = [
+                10, 20, 50, 100, 1000, ['label' => 'Alle', 'value' => 10000],
+            ];
+            if (!in_array($this->pagesize, $page_size_options)) {
+                $page_size_options[] = $this->pagesize;
+                sort($page_size_options);
+            }
+        }
+
         return (object)[
             'htmluniqueid' => $this->htmluniqueid(),
             'uniqueid' => $this->uniqueid,
@@ -1094,10 +1130,18 @@ class table_sql extends moodle_table_sql {
             'enable_global_filter' => ($this->enable_global_filter ?? $this->is_sortable),
             'enable_column_filters' => $enable_column_filters,
             'enable_page_size_selector' => $this->enable_page_size_selector,
+            'page_size_options' => $page_size_options,
             'row_actions_js_callback' => trim($this->row_actions_js_callback) ?: null,
             'enable_detail_panel' => $this->enable_detail_panel,
             'render_detail_panel_js_callback' => trim($this->render_detail_panel_js_callback) ?: null,
+            'user_timezone' => date_default_timezone_get(), // this contains Europe/Berlin (moodle user timezone) and not Asia/Taipei
+            'mrtOptions' => $this->mrt_options ?: (object)[],
         ];
+
+        die(json_encode([
+            'a' => [],
+            'b' => (object)[],
+        ]));
     }
 
     private function get_column_data_type($column) {

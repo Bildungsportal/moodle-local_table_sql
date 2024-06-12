@@ -1,7 +1,7 @@
 // beispiele:
 // https://www.material-react-table.dev/?path=/story/features-search-examples--search-enabled-default
 
-import React, { useContext, useEffect, useMemo, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   MaterialReactTable,
   MRT_RowSelectionState,
@@ -22,6 +22,7 @@ import './App.scss';
 import { useAppConfig, useFetchWithParams } from 'lib/hooks';
 import { convertSnakeCaseToCamelCase, debounce, replacePlaceholders, stringToFunction } from 'lib/helpers';
 import { useLocalization } from 'lib/localization';
+import dayjs from 'dayjs';
 
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
@@ -74,36 +75,208 @@ function useShowStickyColumns(tableConfig) {
   return sticky;
 }
 
-type TData = any;
+function useColumnDef({ getColumn, tableConfig }) {
+  return useMemo<MRT_ColumnDef<TableRow>[]>(() => {
+    return (
+      tableConfig.columns
+        .filter((column) => column.key != 'edit' && column.key != 'delete')
+        // column "id" is hidden for example
+        .filter((column) => !column.internal)
+        .map(
+          (column) =>
+            ({
+              id: column.key,
+              header: column.header
+                // der text wird auch im Suchfeld angezeigt, dort ist kein Newline möglich
+                .replace(/\s*\n\s*/g, ' '),
+              accessorFn: (originalRow) => {
+                // this allows a cell to have a object {"content": "..."} as value
+                if (typeof originalRow[column.key] == 'object') {
+                  return originalRow[column.key]?.content;
+                } else {
+                  return originalRow[column.key];
+                }
+              },
+              // accessorKey: column.key, // String(i),
 
-const DetailPanel = ({ row }: { row: MRT_Row<TData> }) => {
+              // allow newlines in headers
+              Header: column.header.split('\n').map((line, key) => <div key={key}>{line}</div>),
+
+              Cell: ({ renderedCellValue, row, column }) => {
+                let content;
+
+                if (row.original[column.id] === '' || row.original[column.id] === null) {
+                  // original content is empty => no content
+                  return null;
+                }
+                if (typeof row.original[column.id] == 'string' && row.original[column.id].match(/[<>]/)) {
+                  // is html, no highlighting possible
+                  content = <span dangerouslySetInnerHTML={{ __html: row.original[column.id] }} />;
+                } else {
+                  content = typeof renderedCellValue == 'object' ? renderedCellValue : <span dangerouslySetInnerHTML={{ __html: String(renderedCellValue) }} />;
+                }
+
+                let asLink = false;
+                let href = '';
+                let target = '';
+                if (typeof row.original[column.id] == 'object' && row.original[column.id]?.link) {
+                  asLink = true;
+                  href = row.original[column.id]?.link;
+                  target = row.original[column.id]?.target;
+                }
+                if (getColumn(column.id)?.onclick) {
+                  asLink = true;
+                }
+                if (asLink) {
+                  content = (
+                    <a
+                      href={href || '#'}
+                      target={target}
+                      style={{ display: 'block' }}
+                      onClick={(e) => {
+                        // prevent selection
+                        e.stopPropagation();
+
+                        if (!href) {
+                          // prevent going to '#'
+                          e.preventDefault();
+                        }
+
+                        // call js callback if available
+                        stringToFunction(getColumn(column.id)?.onclick)?.({ row: row.original });
+                      }}
+                    >
+                      {content}
+                    </a>
+                  );
+                }
+
+                return content;
+
+                // let url = row.original[column.id + '_table_sql_link'];
+                // if (url) {
+                //   return <a href={url}>{content}</a>;
+                // } else {
+                //   return content;
+                // }
+              },
+              enableSorting: column.sorting !== false,
+              enableColumnFilter: column.filter !== false,
+              minSize: 10,
+              columnFilterModeOptions:
+                column.mrtOptions.filterVariant == 'multi-select'
+                  ? ['contains', 'between']
+                  : column.mrtOptions.filterVariant == 'range-slider'
+                  ? ['between']
+                  : column.data_type == 'timestamp'
+                  ? ['between']
+                  : column.data_type == 'number'
+                  ? [
+                      // 'fuzzy',
+                      // 'contains',
+                      // 'startsWith',
+                      // 'endsWith',
+                      'equals',
+                      'notEquals',
+                      'between',
+                      // 'betweenInclusive',
+                      'greaterThan',
+                      'greaterThanOrEqualTo',
+                      'lessThan',
+                      'lessThanOrEqualTo',
+                      // 'empty',
+                      // 'notEmpty',
+
+                      // 'includesString',
+                      // 'includesStringSensitive',
+                      // 'equalsString',
+                      // 'equalsStringSensitive',
+                      // 'arrIncludes',
+                      // 'arrIncludesAll',
+                      // 'arrIncludesSome',
+                      // 'weakEquals',
+                      // 'inNumberRange',
+                    ]
+                  : [
+                      // 'fuzzy',
+                      'contains',
+                      'startsWith',
+                      'endsWith',
+                      'equals',
+                      'notEquals',
+                      // 'between',
+                      // 'betweenInclusive',
+                      // 'greaterThan',
+                      // 'greaterThanOrEqualTo',
+                      // 'lessThan',
+                      // 'lessThanOrEqualTo',
+                      'empty',
+                      'notEmpty',
+
+                      // 'includesString',
+                      // 'includesStringSensitive',
+                      // 'equalsString',
+                      // 'equalsStringSensitive',
+                      // 'arrIncludes',
+                      // 'arrIncludesAll',
+                      // 'arrIncludesSome',
+                      // 'weakEquals',
+                      // 'inNumberRange',
+                    ],
+
+              filterVariant: column.data_type == 'timestamp' ? 'date-range' : 'text',
+              // disable filtermodes for timestamp (date-range selector), because it only shows 'between' and 'betweenIncludes' options
+              enableColumnFilterModes: column.data_type != 'timestamp',
+              // filterVariant: 'multi-select',
+              // filterSelectOptions: [
+              //   { text: 'Male', value: 'Male' },
+              //   { text: 'Female', value: 'Female' },
+              //   { text: 'Other', value: 'Other' },
+              // ],
+              // geht nicht:
+              // filterComponent: (props) => <div>Filte r123</div>
+
+              ...column.mrtOptions,
+            } as MRT_ColumnDef<TableRow>)
+        )
+    );
+  }, [tableConfig]);
+}
+
+interface RowAction {
+  id: string;
+  disabled?: boolean;
+}
+
+interface Data {
+  selected: boolean;
+  detail_panel_content: string;
+  row_actions: RowAction[];
+}
+interface TableRow {
+  _data: Data;
+  [key: string]: any;
+}
+
+const DetailPanel = ({ row }: { row: MRT_Row<TableRow> }) => {
   const tableConfig = useAppConfig();
 
   // https://www.material-react-table.com/docs/examples/lazy-detail-panel
 
-  // const {
-  //   data: userInfo,
-  //   isLoading,
-  //   isError,
-  // } = useFetchUserInfo(
-  //   {
-  //     phoneNumber: row.id, //the row id is set to the user's phone number
-  //   },
-  //   {
-  //     enabled: row.getIsExpanded(),
-  //   },
-  // );
-  // if (isLoading) return <CircularProgress />;
-  // if (isError) return <Alert severity="error">Error Loading User Info</Alert>;
+  const content = useMemo(() => {
+    if (!row.getIsExpanded()) {
+      return '';
+    }
 
-  // const { favoriteMusic, favoriteSong, quote } = userInfo ?? {};
+    let content = '';
+    if (tableConfig.render_detail_panel_js_callback) {
+      content = tableConfig.render_detail_panel_js_callback({ row });
+    } else {
+      content = row.original._data.detail_panel_content;
+    }
 
-  let content = '';
-  if (tableConfig.render_detail_panel_js_callback) {
-    content = tableConfig.render_detail_panel_js_callback({ row });
-  } else {
-    content = row.original._data.detail_panel_content;
-  }
+    return content;
+  }, [row, row.getIsExpanded()]);
 
   return (
     <Stack gap="0.5rem" minHeight="0px">
@@ -117,67 +290,6 @@ const App = (props) => {
 
   const tableConfig = useAppConfig();
 
-  // const tableConfigError = false;
-
-  const [columnFilters, setColumnFilters] = useState<MRT_ColumnFiltersState>([]);
-  const [columnFilterFns, setColumnFilterFns] = useState<MRT_ColumnFilterFnsState>([] as any);
-  const [globalFilter, setGlobalFilter] = useState('');
-  const [sorting, setSorting] = useState<MRT_SortingState>([
-    {
-      id: tableConfig.sort_default_column,
-      desc: tableConfig.sort_default_order == 'desc',
-    },
-  ]);
-  const [columnVisibility, setColumnVisibility] = useState<MRT_VisibilityState>({});
-  const setColumnVisibilityByUser = (callbackOrState) => {
-    setColumnVisibility((old) => {
-      const newState = typeof callbackOrState == 'function' ? callbackOrState(old) : callbackOrState;
-
-      // remmeber last state in sessionStorage
-      sessionStorage.setItem('local_table_sql-' + tableConfig.uniqueid + '-' + 'columnVisibility', JSON.stringify(newState));
-
-      return newState;
-    });
-  };
-  const [pagination, setPagination] = useState<MRT_PaginationState>({
-    pageIndex: tableConfig.initial_page_index,
-    pageSize: tableConfig.pagesize,
-  });
-  const [showTable, setShowTable] = useState(false);
-  const [selectedRowsCount, setSelectedRowsCount] = useState(0);
-
-  const localization = useLocalization();
-  const { getString } = localization;
-
-  useEffect(() => {
-    // initial actions
-
-    // set all columns to filter "contains"
-    const columnFilterFns = {};
-    tableConfig.columns.forEach((column) => {
-      columnFilterFns[column.key] = 'contains';
-    });
-    setColumnFilterFns(columnFilterFns);
-
-    try {
-      // try to load from session
-      const columnVisibility = JSON.parse(sessionStorage.getItem('local_table_sql-' + tableConfig.uniqueid + '-' + 'columnVisibility') || '') as MRT_VisibilityState;
-      setColumnVisibility(columnVisibility);
-    } catch (e) {
-      // else load defaults
-      const columnVisibility = {} as MRT_VisibilityState;
-      tableConfig.columns.forEach((column) => {
-        if (column.visible === false) {
-          columnVisibility[column.key] = false;
-        }
-      });
-
-      setColumnVisibility(columnVisibility);
-    }
-
-    setShowTable(true);
-  }, []);
-
   function getColumn(key) {
     return tableConfig?.columns?.filter((column) => column.key == key)[0];
   }
@@ -186,6 +298,117 @@ const App = (props) => {
     return originalRow?.id;
     // return originalRow ? originalRow.id || originalRow._data?.id : null;
   }
+
+  const mrtColumns = useColumnDef({ getColumn, tableConfig });
+
+  function getMrtColumn(key) {
+    return mrtColumns.filter((column) => column.id == key)[0];
+  }
+
+  const sessionDataId = 'local_table_sql-' + tableConfig.uniqueid + '-session-config-0001';
+  const initialSessionConfig = useMemo(() => {
+    let config: any = sessionStorage.getItem(sessionDataId);
+    if (config) {
+      config = JSON.parse(config);
+    } else {
+      config = {};
+    }
+
+    // default filtering setzen
+    if (!config.columnFilterFns) {
+      config.columnFilterFns = {};
+    }
+
+    tableConfig.columns.forEach((column) => {
+      if (column.internal) {
+        return;
+      }
+
+      const mrtColumn = getMrtColumn(column.key);
+      config.columnFilterFns[column.key] = config.columnFilterFns[column.key] || mrtColumn.filterFn || mrtColumn.columnFilterModeOptions?.[0];
+    });
+
+    if (!config.columnVisibility) {
+      config.columnVisibility = {};
+    }
+    tableConfig.columns.forEach((column) => {
+      if (column.visible === false && config.columnVisibility[column.key] === undefined) {
+        config.columnVisibility[column.key] = false;
+      }
+    });
+
+    if (config.columnFilters) {
+      config.columnFilters.forEach((filter) => {
+        const mrtColumn = getMrtColumn(filter.id);
+        if (mrtColumn?.filterVariant == 'date-range' && Array.isArray(filter?.value)) {
+          if (filter.value[0] && typeof filter.value[0] == 'string' && filter.value[0].match(/^[0-9]{4}-[0-9]{2}-[0-9]{2}/) /* is a date format */) {
+            filter.value[0] = dayjs(filter.value[0]);
+          }
+          if (filter.value[1] && typeof filter.value[1] == 'string' && filter.value[1].match(/^[0-9]{4}-[0-9]{2}-[0-9]{2}/) /* is a date format */) {
+            filter.value[1] = dayjs(filter.value[1]);
+          }
+        }
+      });
+    }
+
+    return config;
+  }, [tableConfig]);
+
+  // const tableConfigError = false;
+  const [columnFilters, _setColumnFilters] = useState<MRT_ColumnFiltersState>(initialSessionConfig.columnFilters || []);
+  const [columnFilterFns, setColumnFilterFns] = useState<MRT_ColumnFilterFnsState>(initialSessionConfig.columnFilterFns || []);
+  const [globalFilter, setGlobalFilter] = useState(initialSessionConfig.globalFilter || '');
+  const [showGlobalFilter, setShowGlobalFilter] = useState(initialSessionConfig.showGlobalFilter || !!initialSessionConfig.globalFilter || false);
+  const [showColumnFilters, setShowColumnFilters] = useState(initialSessionConfig.showColumnFilters || initialSessionConfig.columnFilters?.length > 0 || false);
+
+  const setColumnFilters = function (mutator) {
+    _setColumnFilters((old) => {
+      let columnFilters = mutator(old);
+      columnFilters = columnFilters.filter((filter) => {
+        const mrtColumn = getMrtColumn(filter.id);
+        return !(mrtColumn?.filterVariant == 'multi-select' && filter.value?.length == 0);
+      });
+      return columnFilters;
+    });
+  };
+
+  const [detailPanelExpanded, setDetailPanelExpanded] = useState(initialSessionConfig.detailPanelExpanded || false);
+  const [sorting, setSorting] = useState<MRT_SortingState>(
+    initialSessionConfig.sorting || [
+      {
+        id: tableConfig.sort_default_column,
+        desc: tableConfig.sort_default_order == 'desc',
+      },
+    ]
+  );
+  const [columnVisibility, setColumnVisibility] = useState<MRT_VisibilityState>(initialSessionConfig.columnVisibility || {});
+  const [pagination, setPagination] = useState<MRT_PaginationState>(
+    initialSessionConfig.pagination || {
+      pageIndex: tableConfig.initial_page_index,
+      pageSize: tableConfig.pagesize,
+    }
+  );
+  const [selectedRowsCount, setSelectedRowsCount] = useState(0);
+
+  // reset the value of range-slider on table load
+  // this is needed so the selected values get displayed correctly in the slide component in PROD
+  // mrt table bug (only in PROD or without the React.StrictMode)
+  useEffect(() => {
+    setColumnFilters((columnFilters) =>
+      columnFilters.map((filter) => {
+        const mrtColumn = getMrtColumn(filter.id);
+
+        if (mrtColumn?.filterVariant == 'range-slider' && Array.isArray(filter.value)) {
+          return { ...filter, value: [...filter.value] };
+        } else {
+          return filter;
+        }
+      })
+    );
+  }, []);
+
+  const localization = useLocalization();
+  const { getString } = localization;
 
   const fetchListParams = {
     page: pagination.pageIndex,
@@ -196,12 +419,52 @@ const App = (props) => {
     page_size: pagination.pageSize,
 
     filters: JSON.stringify(
-      (columnFilters ?? []).map((filter) => {
-        return {
-          ...filter,
-          fn: columnFilterFns[filter.id],
-        };
-      })
+      columnFilters
+        .map((filter: any) => {
+          filter = {
+            ...filter,
+            fn: columnFilterFns[filter.id],
+          } as any;
+
+          if (filter.fn == 'contains' && !filter.value) {
+            return null;
+          }
+
+          if (Array.isArray(filter.value) && filter.value.filter((val) => val !== null && val !== undefined && !(typeof val === 'number' && Number.isNaN(val))).length == 0) {
+            return null;
+          }
+
+          const mrtColumn = getMrtColumn(filter.id);
+
+          // convert date filter to timestamps
+          if (mrtColumn?.filterVariant == 'date-range' && Array.isArray(filter.value)) {
+            // don't change original array, so make a copy!
+            filter.value = [...filter.value];
+            if (filter.value[0] && typeof filter.value[0] == 'object') {
+              // i guess it is a dayjs-object
+              filter.value[0] = Math.round(
+                filter.value[0]
+                  .tz(tableConfig.user_timezone, true) // convert to user_timezone (from the current moodle user)
+                  .valueOf() / 1000
+              );
+            }
+            if (filter.value[1] && typeof filter.value[1] == 'object') {
+              // i guess it is a dayjs-object
+              filter.value[1] =
+                Math.round(
+                  filter.value[1]
+                    .tz(tableConfig.user_timezone, true) // convert to user_timezone (from the current moodle user)
+                    .valueOf() / 1000
+                ) +
+                60 * 60 * 24 - // add extra day to search until end of day
+                1;
+            }
+          }
+
+          return filter;
+        })
+        // filter null values (from map above)
+        .filter((filter) => !!filter)
     ),
     s: globalFilter ?? '',
     tsort: sorting && sorting.length > 0 ? sorting[0].id : null,
@@ -222,30 +485,13 @@ const App = (props) => {
       tableConfig.uniqueid, // add uniqueid, in case the table_sql is displayed multiple times at the page, the query results get shared by useQuery
       JSON.stringify(fetchListParams),
     ],
-    enabled: showTable,
+    // enabled: showTable,
     queryFn: async () => {
       const result = await fetchWithParams(fetchListParams);
 
       if (result && result.type != 'success') {
         throw result;
       }
-
-      // format rows from array to key=>value
-      // result.data = result.data.map((row) => {
-      //   let resultRow = {};
-
-      //   tableConfig.columns.forEach((column, i) => {
-      //     // if (typeof row[i] == 'string' && row[i].match(/<a/i)) {
-      //     //   // link inside row
-      //     //   resultRow[column.key] = stripTags(row[i]);
-      //     //   resultRow[column.key + '_table_sql_link'] = 'url';
-      //     // } else {
-      //     resultRow[column.key] = row[i];
-      //     // }
-      //   });
-
-      //   return resultRow;
-      // });
 
       return result;
     },
@@ -256,7 +502,7 @@ const App = (props) => {
     networkMode: 'always',
   });
 
-  const rows = data?.data;
+  const rows: TableRow[] = data?.data;
 
   // events
   useEffect(() => {
@@ -338,184 +584,7 @@ const App = (props) => {
     }
   }, [rows, isLoading, isRefetching]);
 
-  const columns = useMemo<MRT_ColumnDef<TData>[]>(() => {
-    if (!tableConfig) {
-      return [];
-    }
-
-    return (
-      tableConfig.columns
-        .filter((column) => column.key != 'edit' && column.key != 'delete')
-        // column "id" is hidden for example
-        .filter((column) => !column.internal)
-        .map(
-          (column) =>
-            ({
-              id: column.key,
-              accessorFn: (originalRow) => {
-                // this allows a cell to have a object {"content": "..."} as value
-                if (typeof originalRow[column.key] == 'object') {
-                  return originalRow[column.key]?.content;
-                } else {
-                  return originalRow[column.key];
-                }
-              },
-              // accessorKey: column.key, // String(i),
-
-              // allow newlines in headers
-              Header: column.header.split('\n').map((line, key) => <div key={key}>{line}</div>),
-
-              Cell: ({ renderedCellValue, row, column }) => {
-                let content;
-
-                if (row.original[column.id] === '' || row.original[column.id] === null) {
-                  // original content is empty => no content
-                  return null;
-                }
-                if (typeof row.original[column.id] == 'string' && row.original[column.id].match(/[<>]/)) {
-                  // is html, no highlighting possible
-                  content = <span dangerouslySetInnerHTML={{ __html: row.original[column.id] }} />;
-                } else {
-                  content = typeof renderedCellValue == 'object' ? renderedCellValue : <span dangerouslySetInnerHTML={{ __html: String(renderedCellValue) }} />;
-                }
-
-                let asLink = false;
-                let href = '';
-                let target = '';
-                if (typeof row.original[column.id] == 'object' && row.original[column.id]?.link) {
-                  asLink = true;
-                  href = row.original[column.id]?.link;
-                  target = row.original[column.id]?.target;
-                }
-                if (getColumn(column.id)?.onclick) {
-                  asLink = true;
-                }
-                if (asLink) {
-                  content = (
-                    <a
-                      href={href || '#'}
-                      target={target}
-                      style={{ display: 'block' }}
-                      onClick={(e) => {
-                        // prevent selection
-                        e.stopPropagation();
-
-                        if (!href) {
-                          // prevent going to '#'
-                          e.preventDefault();
-                        }
-
-                        // call js callback if available
-                        stringToFunction(getColumn(column.id)?.onclick)?.({ row: row.original });
-                      }}
-                    >
-                      {content}
-                    </a>
-                  );
-                }
-
-                return content;
-
-                // let url = row.original[column.id + '_table_sql_link'];
-                // if (url) {
-                //   return <a href={url}>{content}</a>;
-                // } else {
-                //   return content;
-                // }
-              },
-              enableSorting: column.sorting !== false,
-              enableColumnFilter: column.filter !== false,
-              minSize: 10,
-              columnFilterModeOptions:
-                column.data_type == 'number'
-                  ? [
-                      // 'fuzzy',
-                      // 'contains',
-                      // 'startsWith',
-                      // 'endsWith',
-                      'equals',
-                      'notEquals',
-                      'between',
-                      // 'betweenInclusive',
-                      'greaterThan',
-                      'greaterThanOrEqualTo',
-                      'lessThan',
-                      'lessThanOrEqualTo',
-                      // 'empty',
-                      // 'notEmpty',
-
-                      // 'includesString',
-                      // 'includesStringSensitive',
-                      // 'equalsString',
-                      // 'equalsStringSensitive',
-                      // 'arrIncludes',
-                      // 'arrIncludesAll',
-                      // 'arrIncludesSome',
-                      // 'weakEquals',
-                      // 'inNumberRange',
-                    ]
-                  : [
-                      // 'fuzzy',
-                      'contains',
-                      'startsWith',
-                      'endsWith',
-                      'equals',
-                      'notEquals',
-                      // 'between',
-                      // 'betweenInclusive',
-                      // 'greaterThan',
-                      // 'greaterThanOrEqualTo',
-                      // 'lessThan',
-                      // 'lessThanOrEqualTo',
-                      'empty',
-                      'notEmpty',
-
-                      // 'includesString',
-                      // 'includesStringSensitive',
-                      // 'equalsString',
-                      // 'equalsStringSensitive',
-                      // 'arrIncludes',
-                      // 'arrIncludesAll',
-                      // 'arrIncludesSome',
-                      // 'weakEquals',
-                      // 'inNumberRange',
-                    ],
-
-              // filterVariant: 'multi-select',
-              // filterSelectOptions: [
-              //   { text: 'Male', value: 'Male' },
-              //   { text: 'Female', value: 'Female' },
-              //   { text: 'Other', value: 'Other' },
-              // ],
-              // geht nicht:
-              // filterComponent: (props) => <div>Filte r123</div>
-
-              ...column,
-            } as MRT_ColumnDef<TData>)
-        )
-    );
-  }, [tableConfig]);
-
-  const rowsPerPageOptions = useMemo(() => {
-    if (tableConfig.enable_page_size_selector === false) {
-      // no selection allowed
-      // in v1: If less than two options are available, no select field will be displayed.
-      // for v2: this needs to behandled differently
-      return [tableConfig.pagesize];
-    }
-
-    let pageSizes = [10, 20, 50, 100];
-
-    const defaultPageSize = tableConfig.pagesize;
-    if (pageSizes.includes(defaultPageSize)) {
-      return pageSizes;
-    } else {
-      pageSizes.push(defaultPageSize);
-      return pageSizes.sort((a, b) => a - b);
-    }
-  }, [pagination.pageSize, tableConfig.enable_page_size_selector]);
-
-  const [rowSelection, setRowSelection] = useState<MRT_RowSelectionState>({});
+  const [rowSelection, setRowSelection] = useState<MRT_RowSelectionState>(initialSessionConfig.rowSelection || {});
 
   // if (tableConfigError) {
   //   return (
@@ -541,7 +610,7 @@ const App = (props) => {
   let renderRowActionMenuItems: any = undefined;
 
   if (tableConfig.row_actions?.length || tableConfig.row_actions_js_callback) {
-    const getRowActions = ({ row }) => {
+    const getRowActions = ({ row }: { row: MRT_Row<TableRow> }) => {
       let row_actions: any[];
 
       if (row.original._data.row_actions) {
@@ -571,17 +640,6 @@ const App = (props) => {
       if (typeof url === 'string') {
         url = replacePlaceholders(url, row.original);
       }
-
-      // in moodle onclick is named lowercase!
-      // if (action.onclick) {
-      //   return {
-      //     onClick: (e) => {
-      //       const ret = stringToFunction(action.onclick)(e, row);
-
-      //       closeMenu?.();
-      //     },
-      //   };
-      // }
 
       if (action.type == 'delete') {
         url += '&confirm=1';
@@ -676,29 +734,67 @@ const App = (props) => {
 
   const enableRowActions = editColumn || deleteColumn || tableConfig.row_actions?.length;
 
-  const cellProps = ({ column }) => {
-    let userStyles = getColumn(column.id)?.style || undefined;
-    if (userStyles) {
-      userStyles = convertSnakeCaseToCamelCase(userStyles);
-    }
+  const maxLinesInHeader = Math.max(
+    ...tableConfig.columns
+      .filter((column) => !column.internal)
+      // search for newlines in header
+      .map((column) => column.header.split('\n').length)
+  );
 
-    let className = `local_table_sql-column-${column.id}`;
-    if (getColumn(column.id)?.class) {
-      className += ' ' + getColumn(column.id)?.class;
-    }
+  const cellProps =
+    (type) =>
+    ({ column }) => {
+      let userStyles = getColumn(column.id)?.style || undefined;
+      if (userStyles) {
+        userStyles = convertSnakeCaseToCamelCase(userStyles);
+      }
 
-    return {
-      style: {
-        ...userStyles,
-      },
-      className,
+      let className = `local_table_sql-column-${column.id}`;
+      if (getColumn(column.id)?.class) {
+        className += ' ' + getColumn(column.id)?.class;
+      }
+
+      if (type == 'head' && maxLinesInHeader > 1) {
+        className += ' multilineHeader-' + maxLinesInHeader;
+      }
+
+      return {
+        style: {
+          ...userStyles,
+        },
+        className,
+      };
     };
-  };
 
   // const hasStickyActionMenu = enableRowActions && tableConfig.row_actions_display_as_menu; // && showStickyColumns;
 
-  const table = useMaterialReactTable({
-    columns,
+  // save all to session
+
+  // sort
+  const lastSessionData = useRef<any>();
+  {
+    const sessionData = {
+      sorting,
+      pagination,
+      globalFilter,
+      columnFilters,
+      columnFilterFns,
+      columnVisibility,
+      showGlobalFilter,
+      showColumnFilters,
+      // rowSelection, // not needed here, it is stored in the moodle session
+      detailPanelExpanded,
+    };
+
+    const newSessionData = JSON.stringify(sessionData);
+    if (lastSessionData.current != newSessionData) {
+      lastSessionData.current = newSessionData;
+      sessionStorage.setItem(sessionDataId, newSessionData);
+    }
+  }
+
+  const table = useMaterialReactTable<TableRow>({
+    columns: mrtColumns,
     data: data?.data ?? [], //data is undefined on first render
     positionPagination: 'both',
     enableSortingRemoval: false, // man kann nicht in einen "unsortierten" Zustand wechseln
@@ -710,7 +806,7 @@ const App = (props) => {
     },
     // enablePinning: hasStickyActionMenu,
     muiPaginationProps: {
-      rowsPerPageOptions,
+      rowsPerPageOptions: tableConfig.page_size_options,
       showRowsPerPage: tableConfig.enable_page_size_selector !== false,
     },
     enableDensityToggle: false,
@@ -742,9 +838,11 @@ const App = (props) => {
     onColumnFiltersChange: setColumnFilters,
     onColumnFilterFnsChange: setColumnFilterFns,
     onGlobalFilterChange: setGlobalFilter,
+    onShowGlobalFilterChange: setShowGlobalFilter,
+    onShowColumnFiltersChange: setShowColumnFilters,
     onPaginationChange: setPagination,
     onSortingChange: setSorting,
-    onColumnVisibilityChange: setColumnVisibilityByUser,
+    onColumnVisibilityChange: setColumnVisibility,
     renderTopToolbarCustomActions: () => (
       <div></div>
       // <Tooltip arrow title="Refresh Data">
@@ -754,6 +852,7 @@ const App = (props) => {
       // </Tooltip>
     ),
     renderDetailPanel: tableConfig.enable_detail_panel ? ({ row }) => <DetailPanel row={row} /> : undefined,
+    onExpandedChange: setDetailPanelExpanded,
     rowCount: data?.meta?.total ?? 0,
     state: {
       columnFilters,
@@ -766,6 +865,9 @@ const App = (props) => {
       showProgressBars: isFetching,
       sorting,
       rowSelection,
+      showGlobalFilter,
+      showColumnFilters,
+      expanded: detailPanelExpanded,
     },
     muiTableBodyProps: {
       sx: {
@@ -897,13 +999,33 @@ const App = (props) => {
       } as any;
 
       if (tableConfig.enable_row_selection) {
-        props.onClick = row.getToggleSelectedHandler();
+        props.onClick = function (e) {
+          // don't handle selection click, if clicked on exapnd-butotn or action menu
+          if (
+            e.target.closest('.local_table_sql-column-mrt-row-expand') ||
+            e.target.closest('.local_table_sql-column-mrt-row-actions') ||
+            e.target.closest('.local_table_sql-ignore-click-row-action')
+          ) {
+            return;
+          }
+
+          row.getToggleSelectedHandler()(e);
+        };
         props.sx.cursor = 'pointer';
       } else if (tableConfig.enable_detail_panel) {
-        // geht nicht:
-        // props.onClick = row.getToggleExpandedHandler();
-        // geht:
         props.onClick = function (e) {
+          // don't handle expand click, if clicked on select-box or action menu
+          if (
+            e.target.closest('.local_table_sql-column-mrt-row-select') ||
+            e.target.closest('.local_table_sql-column-mrt-row-actions') ||
+            e.target.closest('.local_table_sql-ignore-click-row-action')
+          ) {
+            return;
+          }
+
+          // geht nicht:
+          // row.getToggleExpandedHandler()();
+          // geht:
           e.target.closest('tr').querySelector('td.local_table_sql-column-mrt-row-expand button')?.click();
         };
         props.sx.cursor = 'pointer';
@@ -911,19 +1033,22 @@ const App = (props) => {
 
       return props;
     },
-    muiTableHeadCellProps: cellProps,
-    muiTableBodyCellProps: cellProps,
+    muiTableHeadCellProps: cellProps('head'),
+    muiTableBodyCellProps: cellProps('body'),
+
+    muiFilterDatePickerProps: {
+      // ohne dem kann man nur Jahr und Tag wählen
+      // mit dieser Option kann Jahr, Monat und Tag gewählt werden
+      views: ['year', 'month', 'day'],
+    },
+
+    // turn on row virtualization for tables with a long list, this makes scrolling much smoother
+    enableRowVirtualization: pagination.pageSize >= 500,
+
+    ...tableConfig.mrtOptions,
   });
 
-  if (!showTable) {
-    return (
-      <Paper>
-        <div style={{ minHeight: 200, padding: 20 }}>{getString('loading')}</div>
-      </Paper>
-    );
-  } else {
-    return <MaterialReactTable table={table} />;
-  }
+  return <MaterialReactTable table={table} />;
 };
 
 export default App;

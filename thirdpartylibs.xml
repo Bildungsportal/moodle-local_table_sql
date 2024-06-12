@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<libraries>
+    <library>
+        <location>js/main.js</location>
+        <name>match-sorter-utils</name>
+        <version>xxx</version>
+        <license>MIT License</license>
+        <licenseversion></licenseversion>
+    </library>
+    <library>
+        <location>js/main.js</location>
+        <name>React</name>
+        <version>16.13.1</version>
+        <license>React License</license>
+        <licenseversion></licenseversion>
+    </library>
+    <library>
+        <location>js/main.js</location>
+        <name>match-sorter</name>
+        <version>xxx</version>
+        <license>MIT License</license>
+        <licenseversion></licenseversion>
+    </library>
+    <library>
+        <location>js/main.js</location>
+        <name>@mui/icons-material</name>
+        <version>5.14.0</version>
+        <license>MIT License</license>
+        <licenseversion></licenseversion>
+    </library>
+    <library>
+        <location>js/main.js</location>
+        <name>@mui/material</name>
+        <version>5.14.0</version>
+        <license>MIT License</license>
+        <licenseversion></licenseversion>
+    </library>
+    <library>
+        <location>js/main.js</location>
+        <name>@mui/x-date-pickers</name>
+        <version>7.0.0</version>
+        <license>MIT License</license>
+        <licenseversion></licenseversion>
+    </library>
+    <library>
+        <location>js/main.js</location>
+        <name>dayjs</name>
+        <version>1.11.11</version>
+        <license>MIT License</license>
+        <licenseversion></licenseversion>
+    </library>
+    <library>
+        <location>js/main.js</location>
+        <name>immer</name>
+        <version>9.0.19</version>
+        <license>MIT License</license>
+        <licenseversion></licenseversion>
+    </library>
+    <library>
+        <location>js/main.js</location>
+        <name>material-react-table</name>
+        <version>2.13.0</version>
+        <license>MIT License</license>
+        <licenseversion></licenseversion>
+    </library>
+    <library>
+        <location>js/main.js</location>
+        <name>zustand</name>
+        <version>4.3.2</version>
+        <license>MIT License</license>
+        <licenseversion></licenseversion>
+    </library>
+</libraries>
