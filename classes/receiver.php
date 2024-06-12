@@ -31,6 +31,7 @@ use external_value;
 defined('MOODLE_INTERNAL') || die;
 
 require_once("$CFG->libdir/tablelib.php");
+require_once("$CFG->libdir/externallib.php");
 
 class receiver extends \external_api {
     public static function receive_parameters() {
