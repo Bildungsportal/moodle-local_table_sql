@@ -23,7 +23,7 @@
 
 defined('MOODLE_INTERNAL') || die;
 
-$plugin->version = 2024052800;
+$plugin->version = 2024091000;
 $plugin->requires = 2022041900;
 $plugin->component = 'local_table_sql';
 $plugin->release = '0.2';

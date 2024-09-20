@@ -132,7 +132,7 @@ function useColumnDef({ getColumn, tableConfig }) {
                     <a
                       href={href || '#'}
                       target={target}
-                      style={{ display: 'block' }}
+                      className="as-link"
                       onClick={(e) => {
                         // prevent selection
                         e.stopPropagation();
@@ -793,6 +793,36 @@ const App = (props) => {
     }
   }
 
+  const eventData = {
+    isFetching,
+    isError,
+    selectedRowsCount,
+  };
+
+  // const fireEvent = useMemo(
+  //     () =>
+  //         debounce((eventData) => {
+  //           console.log(eventData, tableConfig.containerElement);
+  //           // tableConfig.containerElement
+  //         }, 250),
+  //     [tableConfig.containerElement]
+  // );
+
+  const fireEvent = (state) => {
+    // Dispatch the event
+    tableConfig.containerElement.dispatchEvent(
+      new CustomEvent('local_table_sql:state', {
+        detail: state,
+        bubbles: true, // Set this to true to allow bubbling
+        cancelable: true, // Optional: allows the event to be canceled
+      })
+    );
+  };
+
+  useEffect(() => {
+    fireEvent(eventData);
+  }, [JSON.stringify(eventData)]);
+
   const table = useMaterialReactTable<TableRow>({
     columns: mrtColumns,
     data: data?.data ?? [], //data is undefined on first render
@@ -1000,12 +1030,8 @@ const App = (props) => {
 
       if (tableConfig.enable_row_selection) {
         props.onClick = function (e) {
-          // don't handle selection click, if clicked on exapnd-butotn or action menu
-          if (
-            e.target.closest('.local_table_sql-column-mrt-row-expand') ||
-            e.target.closest('.local_table_sql-column-mrt-row-actions') ||
-            e.target.closest('.local_table_sql-ignore-click-row-action')
-          ) {
+          // don't handle expand click, if clicked on select-box, action menu, links, inputs or buttons
+          if (e.target.closest('a, button, input, .local_table_sql-column-mrt-row-expand, .local_table_sql-column-mrt-row-actions, .local_table_sql-ignore-click-row-action')) {
             return;
           }
 
@@ -1014,12 +1040,8 @@ const App = (props) => {
         props.sx.cursor = 'pointer';
       } else if (tableConfig.enable_detail_panel) {
         props.onClick = function (e) {
-          // don't handle expand click, if clicked on select-box or action menu
-          if (
-            e.target.closest('.local_table_sql-column-mrt-row-select') ||
-            e.target.closest('.local_table_sql-column-mrt-row-actions') ||
-            e.target.closest('.local_table_sql-ignore-click-row-action')
-          ) {
+          // don't handle expand click, if clicked on select-box, action menu, links, inputs or buttons
+          if (e.target.closest('a, button, input, .local_table_sql-column-mrt-row-expand, .local_table_sql-column-mrt-row-actions, .local_table_sql-ignore-click-row-action')) {
             return;
           }
 

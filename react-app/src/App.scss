@@ -68,3 +68,13 @@ table.has-sticky-action-menu {
 .multilineHeader-3 .Mui-TableHeadCell-Content {
   min-height: 76px;
 }
+
+/* no click action on row, so use default cursor */
+td.local_table_sql-ignore-click-row-action {
+  cursor: default;
+  background: red !important;
+}
+
+.as-link {
+  display: block;
+}
