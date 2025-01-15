@@ -4,10 +4,10 @@
   // abstand von pagination control verringern
   margin-top: 0 !important;
 }
-.MuiTableContainer-root {
-  td:first-child,
-  th:first-child {
-    padding-left: 20px !important;
+.MuiTable-root {
+  & > tbody > tr > td:first-child,
+  & > thead > tr > th:first-child {
+    padding-left: 20px;
   }
 }
 
@@ -69,12 +69,36 @@ table.has-sticky-action-menu {
   min-height: 76px;
 }
 
-/* no click action on row, so use default cursor */
-td.local_table_sql-ignore-click-row-action {
-  cursor: default;
-  background: red !important;
-}
-
 .as-link {
   display: block;
+}
+
+/* abstand zwischen action-buttons, aber nur wenn es tatsächlich buttons sind */
+td.local_table_sql-column-mrt-row-actions > *:not(:first-child):not(.MuiIconButton-root) {
+  margin-left: 6px;
+}
+
+/* remove the material-react-table hover effect for table inside a cell */
+.MuiTableCell-root td:after {
+  content: none; /* Or content: ""; */
+  display: none; /* Optional, ensures it doesn't take up space */
+}
+
+/* clickable style für zellen, aber nur wenn diese auch geklickt werden können. action und "ignore-click" können nicht geklickt werden */
+.clickable-row > td:not(.local_table_sql-column-mrt-row-actions, .local_table_sql-ignore-click-row-action) {
+  cursor: pointer;
+}
+
+mark {
+  background-color: rgb(255, 203, 127);
+  border-radius: 2px;
+  color: #000;
+  padding: 2px 1px;
+}
+
+/* Datumsauswahl von bis untereinander, damit weniger Platz benötigt wird */
+.local_table_sql-column-type-timestamp .MuiCollapse-root .MuiBox-root {
+  display: block;
+  max-width: 160px;
+  padding-left: 2px;
 }

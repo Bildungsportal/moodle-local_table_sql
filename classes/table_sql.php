@@ -32,7 +32,7 @@ use function fullname;
 
 defined('MOODLE_INTERNAL') || die();
 
-require_once($CFG->libdir.'/tablelib.php');
+require_once($CFG->libdir . '/tablelib.php');
 
 class table_sql extends moodle_table_sql {
 
@@ -55,9 +55,10 @@ class table_sql extends moodle_table_sql {
     private array $column_options = [];
 
     private bool $immediately_call_actions = true;
+    private string $xhr_url = '';
 
     private bool $is_xhr = false;
-    private array $xhr_formatted_data = [];
+    protected array $xhr_formatted_data = [];
 
     private array $full_text_search_columns = [];
 
@@ -155,17 +156,18 @@ class table_sql extends moodle_table_sql {
             $this->baseurl = $PAGE->url;
         }
 
-        if (headers_sent()) {
+        if (headers_sent() && $this->immediately_call_actions && !$this->xhr_url) {
             throw new moodle_exception('headers already sent and output already started! create a new table_sql before calling $OUTPUT->header()!');
         }
 
-        if ($PAGE->requires) {
+        if (!headers_sent() && $PAGE->requires) {
             // For Typo3 Integration: in typo3 $PAGE->requires is not available
-
             $PAGE->requires->css('/local/table_sql/style/main.min.css');
         }
 
-        $this->out_actions();
+        if ($this->immediately_call_actions) {
+            $this->out_actions();
+        }
     }
 
     /**
@@ -265,11 +267,17 @@ class table_sql extends moodle_table_sql {
     /**
      * Prevent table_sql from calling download and xhr actions directly in constructor and possibly exiting the script there
      * Instead you have to call it manually with $table->out_actions();
-     * @param bool $immediately_call_actions
-     * @return void
      */
-    protected function set_immediately_call_actions(bool $immediately_call_actions) {
+    protected function set_immediately_call_actions(bool $immediately_call_actions): void {
         $this->immediately_call_actions = $immediately_call_actions;
+    }
+
+    protected function set_xhr_url(string|\moodle_url $xhr_url): void {
+        if ($xhr_url instanceof \moodle_url) {
+            $xhr_url = $xhr_url->out(false);
+        }
+
+        $this->xhr_url = $xhr_url;
     }
 
     protected function set_table_columns($cols) {
@@ -290,7 +298,7 @@ class table_sql extends moodle_table_sql {
             if (preg_match('!\s!', $from)) {
                 // propbably is a select query
             } else {
-                $from = '{'.$from.'}';
+                $from = '{' . $from . '}';
             }
         }
 
@@ -303,6 +311,11 @@ class table_sql extends moodle_table_sql {
 
     protected function set_sql_query(string $query, array $params = []) {
         parent::set_sql('*', "({$query}) AS results", '1=1', $params);
+        $this->sql->table = '';
+    }
+
+    protected function set_sql_table(string $table) {
+        $this->sql->table = $table;
     }
 
     /**
@@ -316,7 +329,7 @@ class table_sql extends moodle_table_sql {
 
         // allowed types
         if (!in_array($param_type, [SQL_PARAMS_NAMED, SQL_PARAMS_QM])) {
-            throw new dml_exception('typenotimplement: '.$param_type);
+            throw new dml_exception('typenotimplement: ' . $param_type);
         }
 
         if ($param_type != SQL_PARAMS_QM) {
@@ -330,17 +343,17 @@ class table_sql extends moodle_table_sql {
         $select = [];
         $params = [];
         foreach ($values as $id => $name) {
-            $select[] = '(SELECT '.
+            $select[] = '(SELECT ' .
                 // casting needed for postgres!
-                $DB->sql_cast_char2int('?').' as id,
-                    ? as name)'."\n";
+                $DB->sql_cast_char2int('?') . ' as id,
+                    ? as name)' . "\n";
             $params[] = $id;
             $params[] = $name;
         }
 
-        $select = "(SELECT ".$DB->sql_group_concat('aggregated_table.name')."
-            FROM (".join(' UNION ', $select).") aggregated_table
-            JOIN ".str_replace('?', 'aggregated_table.id', $join).')';
+        $select = "(SELECT " . $DB->sql_group_concat('aggregated_table.name') . "
+            FROM (" . join(' UNION ', $select) . ") aggregated_table
+            JOIN " . str_replace('?', 'aggregated_table.id', $join) . ')';
 
         return [$select, $params];
     }
@@ -354,8 +367,8 @@ class table_sql extends moodle_table_sql {
     protected function sql_aggregated_column_from_query(string $select, string $from, string $sort = '') {
         global $DB;
 
-        $select = "(SELECT ".$DB->sql_group_concat($select, ', ', $sort ?: $select)."
-            FROM ".$from.")";
+        $select = "(SELECT " . $DB->sql_group_concat($select, ', ', $sort ?: $select) . "
+            FROM " . $from . ")";
 
         return $select;
     }
@@ -366,16 +379,16 @@ class table_sql extends moodle_table_sql {
         if ($default === null) {
             $default = 'NULL';
         } else {
-            $default = "'".addslashes(strip_tags($default))."'";
+            $default = "'" . addslashes(strip_tags($default)) . "'";
         }
 
-        $sql = "CASE ".
+        $sql = "CASE " .
             join("\n", array_map(function($key, $value) use ($column, $DB) {
-                return "WHEN {$column}=".(is_string($key) ? "'".addslashes($key)."'" : $key)." THEN '".
+                return "WHEN {$column}=" . (is_string($key) ? "'" . addslashes($key) . "'" : $key) . " THEN '" .
                     // doppelpunkte werfen einen sql fehler?!?
                     str_replace(':', '',
-                        stripslashes(strip_tags($value)))."'";
-            }, array_keys($values), array_values($values))).
+                        stripslashes(strip_tags($value))) . "'";
+            }, array_keys($values), array_values($values))) .
             " ELSE {$default} END";
 
         return $sql;
@@ -404,7 +417,7 @@ class table_sql extends moodle_table_sql {
             $format = strtr($format, $substitutions);
 
             if (strpos($format, '%') !== false) {
-                throw new dml_exception('date format contains unknown identifiers: '.$format);
+                throw new dml_exception('date format contains unknown identifiers: ' . $format);
             }
 
             $timezone = str_replace(['"', '\''], '', get_user_timezone());
@@ -426,7 +439,13 @@ class table_sql extends moodle_table_sql {
             $timezone = str_replace(['"', '\''], '', get_user_timezone());
 
             // convert from mysql internal timezone to user timezone
-            return "DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME({$column}), '{$mysql_timezone}', '{$timezone}'), '{$format}')";
+            // Achtung: for mariadb the timezones need to be loaded once by root:
+            // https://mariadb.com/kb/en/convert_tz/
+            // timezone load utility: https://mariadb.com/kb/en/mysql_tzinfo_to_sql/
+            return "IF (
+                {$column} > 0,
+                DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME({$column}), '{$mysql_timezone}', '{$timezone}'), '{$format}'),
+                '')";
         }
     }
 
@@ -435,7 +454,7 @@ class table_sql extends moodle_table_sql {
 
         $uniqueid++;
 
-        return $prefix.$uniqueid;
+        return $prefix . $uniqueid;
     }
 
     protected function no_filter($column) {
@@ -449,12 +468,12 @@ class table_sql extends moodle_table_sql {
             list($column_filter_where, $column_filter_params) = $this->get_column_filter_where($param_type);
             list($global_filter_where, $global_filter_params) = $this->get_global_filter_where($param_type);
 
-            return ['('.$column_filter_where.' AND '.$global_filter_where.')', array_merge($column_filter_params, $global_filter_params)];
+            return ['(' . $column_filter_where . ' AND ' . $global_filter_where . ')', array_merge($column_filter_params, $global_filter_params)];
         } else {
             $column = $this->get_sql_column('id');
 
             list ($insql, $inparams) = $DB->get_in_or_equal($this->get_selected_rowids(), $param_type, 'id_filter_');
-            return [$column.' '.$insql, $inparams];
+            return [$column . ' ' . $insql, $inparams];
         }
     }
 
@@ -476,14 +495,14 @@ class table_sql extends moodle_table_sql {
             if ($param_type === SQL_PARAMS_QM) {
                 return '?';
             } else {
-                return ':global_filter_'.count($params);
+                return ':global_filter_' . count($params);
             }
         };
         $get_param_key = function() use (&$params, $param_type) {
             if ($param_type === SQL_PARAMS_QM) {
                 return count($params);
             } else {
-                return 'global_filter_'.count($params);
+                return 'global_filter_' . count($params);
             }
         };
 
@@ -506,25 +525,25 @@ class table_sql extends moodle_table_sql {
 
                 // column needs to be casted to string for comparison in postgres!
                 $filter_where_for_search_part[] = $DB->sql_like($DB->sql_cast_to_char($sql_column), $get_param_name(), false, false);
-                $params[$get_param_key()] = '%'.$DB->sql_like_escape($formatted_searchpart).'%';
+                $params[$get_param_key()] = '%' . $DB->sql_like_escape($formatted_searchpart) . '%';
             }
 
             foreach ($this->full_text_search_columns as $sql_column) {
                 $filter_where_for_search_part[] = $DB->sql_like($DB->sql_cast_to_char($sql_column), $get_param_name(), false, false);
-                $params[$get_param_key()] = '%'.$DB->sql_like_escape($search_part).'%';
+                $params[$get_param_key()] = '%' . $DB->sql_like_escape($search_part) . '%';
             }
 
-            $filter_where[] = '('.join(' OR ', $filter_where_for_search_part).')';
+            $filter_where[] = '(' . join(' OR ', $filter_where_for_search_part) . ')';
         }
 
-        return ['('.join(' AND ', $filter_where).')', $params];
+        return ['(' . join(' AND ', $filter_where) . ')', $params];
     }
 
     private function get_column_filter_where($param_type = SQL_PARAMS_QM) {
         global $DB;
 
         if (!in_array($param_type, [SQL_PARAMS_NAMED, SQL_PARAMS_QM])) {
-            throw new dml_exception('typenotimplement: '.$param_type);
+            throw new dml_exception('typenotimplement: ' . $param_type);
         }
 
         $filters = optional_param('filters', '', PARAM_RAW);
@@ -543,14 +562,14 @@ class table_sql extends moodle_table_sql {
             if ($param_type === SQL_PARAMS_QM) {
                 return '?';
             } else {
-                return ':filter_'.count($params);
+                return ':filter_' . count($params);
             }
         };
         $get_param_key = function() use (&$params, $param_type) {
             if ($param_type === SQL_PARAMS_QM) {
                 return count($params);
             } else {
-                return 'filter_'.count($params);
+                return 'filter_' . count($params);
             }
         };
 
@@ -570,7 +589,7 @@ class table_sql extends moodle_table_sql {
             if (($this->column_options[$column]['data_type'] ?? '') == static::PARAM_TIMESTAMP) {
                 $sql_column_as_char = $this->sql_format_timestamp($sql_column);
             } else {
-                $sql_column_as_char = $sql_column;
+                $sql_column_as_char = $DB->sql_cast_to_char($sql_column);
             }
 
             // just always use original column for now
@@ -590,13 +609,13 @@ class table_sql extends moodle_table_sql {
                 if ($value) {
                     if (is_array($value)) {
                         // list of possible values
-                        list ($insql, $inparams) = $DB->get_in_or_equal($value, $param_type, 'like_filter_'.str_replace('.', '', microtime(true)));
-                        $filter_where[] = $sql_column_as_char.' '.$insql;
+                        list ($insql, $inparams) = $DB->get_in_or_equal($value, $param_type, 'like_filter_' . str_replace('.', '', microtime(true)));
+                        $filter_where[] = $sql_column_as_char . ' ' . $insql;
                         $params = array_merge($params, $inparams);
                     } else {
                         // text suche
                         $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
-                        $params[$get_param_key()] = '%'.preg_replace('!\s+!', '%', $DB->sql_like_escape($value)).'%';
+                        $params[$get_param_key()] = '%' . preg_replace('!\s+!', '%', $DB->sql_like_escape($value)) . '%';
                     }
                 }
             } elseif ($filter->fn == 'equals') {
@@ -610,21 +629,21 @@ class table_sql extends moodle_table_sql {
             } elseif ($filter->fn == 'startsWith') {
                 // case insensitive compare
                 $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
-                $params[$get_param_key()] = $DB->sql_like_escape($value).'%';
+                $params[$get_param_key()] = $DB->sql_like_escape($value) . '%';
             } elseif ($filter->fn == 'endsWith') {
                 $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
-                $params[$get_param_key()] = '%'.$DB->sql_like_escape($value);
+                $params[$get_param_key()] = '%' . $DB->sql_like_escape($value);
             } elseif ($filter->fn == 'greaterThan' && strlen($value) > 0) {
-                $filter_where[] = $sql_column_as_number." > ".$get_param_name();
+                $filter_where[] = $sql_column_as_number . " > " . $get_param_name();
                 $params[$get_param_key()] = (float)$value;
             } elseif ($filter->fn == 'greaterThanOrEqualTo' && strlen($value) > 0) {
-                $filter_where[] = $sql_column_as_number." >= ".$get_param_name();
+                $filter_where[] = $sql_column_as_number . " >= " . $get_param_name();
                 $params[$get_param_key()] = (float)$value;
             } elseif ($filter->fn == 'lessThan' && strlen($value) > 0) {
-                $filter_where[] = $sql_column_as_number." < ".$get_param_name();
+                $filter_where[] = $sql_column_as_number . " < " . $get_param_name();
                 $params[$get_param_key()] = (float)$value;
             } elseif ($filter->fn == 'lessThanOrEqualTo' && strlen($value) > 0) {
-                $filter_where[] = $sql_column_as_number." <= ".$get_param_name();
+                $filter_where[] = $sql_column_as_number . " <= " . $get_param_name();
                 $params[$get_param_key()] = (float)$value;
             } elseif ($filter->fn == 'empty') {
                 $filter_where[] = "COALESCE($sql_column, '') = ''";
@@ -632,16 +651,16 @@ class table_sql extends moodle_table_sql {
                 $filter_where[] = "COALESCE($sql_column, '') <> ''";
             } elseif ($filter->fn == 'between' || $filter->fn == 'betweenInclusive') {
                 if (strlen($value[0] ?? '') > 0) {
-                    $filter_where[] = $sql_column_as_number." >= ".$get_param_name();
+                    $filter_where[] = $sql_column_as_number . " >= " . $get_param_name();
                     $params[$get_param_key()] = (float)$value[0];
                 }
                 if (strlen($value[1] ?? '') > 0) {
-                    $filter_where[] = $sql_column_as_number." <= ".$get_param_name();
+                    $filter_where[] = $sql_column_as_number . " <= " . $get_param_name();
                     $params[$get_param_key()] = (float)$value[1];
                 }
             } else {
                 var_dump($filter);
-                die('filter function not understood: '.$filter->fn);
+                die('filter function not understood: ' . $filter->fn);
             }
         }
 
@@ -649,7 +668,7 @@ class table_sql extends moodle_table_sql {
             return ['1=1', []];
         }
 
-        return ['('.join(' AND ', $filter_where).')', $params];
+        return ['(' . join(' AND ', $filter_where) . ')', $params];
     }
 
     private function get_sql_column($column) {
@@ -658,11 +677,11 @@ class table_sql extends moodle_table_sql {
         }
 
         // get sql_column from query
-        if (preg_match('!(^|[\s,()])(?<column>[^.\s,()]+\.[^.\s,]+)\s+as\s+?'.preg_quote($column, '!').'([,\s]|$)!i', $this->sql->fields ?? '', $matches)) {
+        if (preg_match('!(^|[\s,()])(?<column>[^.\s,()]+\.[^.\s,]+)\s+as\s+?' . preg_quote($column, '!') . '([,\s]|$)!i', $this->sql->fields ?? '', $matches)) {
             // matches u.some_col AS username
             // matches u.some_col username
             $sql_column = $matches['column'];
-        } elseif (preg_match('!(^|[\s,])(?<column>[^.\s,()]+\.'.preg_quote($column, '!').')([,\s]|$)!i', $this->sql->fields ?? '', $matches)) {
+        } elseif (preg_match('!(^|[\s,])(?<column>[^.\s,()]+\.' . preg_quote($column, '!') . ')([,\s]|$)!i', $this->sql->fields ?? '', $matches)) {
             // matches u.username
             $sql_column = $matches['column'];
         } else {
@@ -670,7 +689,7 @@ class table_sql extends moodle_table_sql {
             if (preg_match('!^[^\s,()]+\s+(as\s+)?(?<table>[^\s,()]+)!i', $this->sql->from ?? '', $matches)) {
                 // matches long_table AS short_table
                 // matches long_table short_table
-                $sql_column = $matches['table'].'.'.$column;
+                $sql_column = $matches['table'] . '.' . $column;
             } else {
                 $sql_column = $column;
             }
@@ -680,7 +699,7 @@ class table_sql extends moodle_table_sql {
     }
 
 
-    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string $onclick = '') {
+    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string $onclick = '', mixed $customdata = null) {
         if (!$url) {
             if ($type == 'edit') {
                 $url = new \moodle_url($this->baseurl, ['action' => 'edit', 'id' => '{id}']);
@@ -703,10 +722,11 @@ class table_sql extends moodle_table_sql {
             'label' => $label,
             // dies erlaubt auch numerische ids, welche zu string convertiert werden
             // und erlaubt auch eine id '0'
-            'id' => $id === '' ? 'action-'.(count($this->row_actions) + 1) : $id,
+            'id' => $id === '' ? 'action-' . (count($this->row_actions) + 1) : $id,
             'disabled' => $disabled,
             'icon' => $icon,
             'onclick' => trim($onclick),
+            'customdata' => $customdata,
         ];
     }
 
@@ -759,6 +779,13 @@ class table_sql extends moodle_table_sql {
         return null;
     }
 
+    protected function get_row_actions_v2(object $row): array {
+        // clone everything, so the original objects don't get modified!
+        $row_actions = unserialize(serialize($this->row_actions));
+
+        return $row_actions;
+    }
+
     /**
      * Query the db. Store results in the table object for use by build_table.
      *
@@ -805,7 +832,7 @@ class table_sql extends moodle_table_sql {
 
         [$filter_where, $filter_params] = $this->get_filter_where($this->get_sql_param_type_from_param_array($params));
         $params = array_merge($params, $filter_params);
-        $sql .= ' AND '.$filter_where;
+        $sql .= ' AND ' . $filter_where;
 
         // Add order by if needed.
         $order_by = $this->get_order_by($countOnly);
@@ -838,7 +865,7 @@ class table_sql extends moodle_table_sql {
 
     protected function get_order_by($countOnly) {
         if (!$countOnly && $sqlsort = $this->get_sql_sort()) {
-            return " ORDER BY ".$sqlsort;
+            return " ORDER BY " . $sqlsort;
         } else {
             return '';
         }
@@ -891,7 +918,7 @@ class table_sql extends moodle_table_sql {
                     'target' => $target,
                 ];
             } else {
-                return '<a href="'.s($link).'">'.s($content).'</a>';
+                return '<a href="' . s($link) . '">' . s($content) . '</a>';
             }
         } else {
             return $content;
@@ -943,10 +970,6 @@ class table_sql extends moodle_table_sql {
     }
 
     public function out_actions() {
-        if (!$this->immediately_call_actions) {
-            return;
-        }
-
         if ($this->is_downloading()) {
             if (!$this->is_downloadable()) {
                 // when is_downloadable was not set in the configuration
@@ -976,7 +999,7 @@ class table_sql extends moodle_table_sql {
     }
 
     protected function htmluniqueid() {
-        return 'table-sql-'.preg_replace('![^a-z0-9\-]!i', '', $this->uniqueid);
+        return 'table-sql-' . preg_replace('![^a-z0-9\-]!i', '', $this->uniqueid);
     }
 
     /**
@@ -1002,15 +1025,15 @@ class table_sql extends moodle_table_sql {
             $PAGE->requires->strings_for_js(array_keys($strings), 'local_table_sql');
 
             $PAGE->requires->js('/local/table_sql/js/main.js');
-            $PAGE->requires->js_init_code("table_sql_start(".json_encode(array_merge([
+            $PAGE->requires->js_init_code("table_sql_start(" . json_encode(array_merge([
                     '__info' => is_siteadmin() ? 'Pretty print is only for admin!' : '',
-                    'container' => '#'.$this->htmluniqueid(),
+                    'container' => '#' . $this->htmluniqueid(),
                 ], (array)$this->get_config()
                 // TODO later: add pagesize as parameter for the app?
-                ), is_siteadmin() ? JSON_PRETTY_PRINT : 0).")");
+                ), is_siteadmin() ? JSON_PRETTY_PRINT : 0) . ")");
         }
 
-        echo '<div id="'.$this->htmluniqueid().'">';
+        echo '<div id="' . $this->htmluniqueid() . '">';
         if (in_array(TABLE_P_TOP, $this->showdownloadbuttonsat)) {
             echo $this->download_buttons();
         }
@@ -1112,6 +1135,11 @@ class table_sql extends moodle_table_sql {
                 // replace encoded placeholders '{id}'
                 $action->url = preg_replace('!%7B([a-z0-9_]+)%7D!i', '{$1}', $action->url);
             }
+
+            // hide customdata in config output
+            $action = clone $action;
+            unset($action->customdata);
+
             return $action;
         }, $this->row_actions);
 
@@ -1137,6 +1165,7 @@ class table_sql extends moodle_table_sql {
         return (object)[
             'htmluniqueid' => $this->htmluniqueid(),
             'uniqueid' => $this->uniqueid,
+            'url' => $this->xhr_url,
             'current_language' => current_language(),
             'pagesize' => $this->pagesize,
             'initial_page_index' => $this->initial_page_index,
@@ -1176,7 +1205,7 @@ class table_sql extends moodle_table_sql {
         $sql_column = explode('.', $sql_column);
         if (count($sql_column) >= 2) {
             // dont't allow brackets () in table name, because sql->from could be a select statement!
-            if ($this->sql && preg_match('!(?<table>[^\s,()]+)\s+'.preg_quote($sql_column[0], '!').'(\s|$)!', $this->sql->from, $matches)) {
+            if ($this->sql && preg_match('!(?<table>[^\s,()]+)\s+' . preg_quote($sql_column[0], '!') . '(\s|$)!', $this->sql->from, $matches)) {
                 $table = trim($matches['table'], '{}');
             } else {
                 $table = $sql_column[0];
@@ -1216,19 +1245,17 @@ class table_sql extends moodle_table_sql {
         } elseif ($type == 'text' || $type == 'longtext' || $type == 'varchar') {
             return static::PARAM_TEXT;
         } else {
-            throw new \moodle_exception('unknown db column type: '.$type);
+            throw new \moodle_exception('unknown db column type: ' . $type);
         }
     }
 
     private function handle_xhr(): void {
-        global $DB, $PAGE;
-
-        header('Cache-Control: private, must-revalidate, pre-check=0, post-check=0, max-age=0');
-        header('Pragma: no-cache');
-        header('Expires: '.gmdate('D, d M Y H:i:s', 0).' GMT');
-        header("Content-Type: application/json\n");
-
         $json_output = function($data): void {
+            header('Cache-Control: private, must-revalidate, pre-check=0, post-check=0, max-age=0');
+            header('Pragma: no-cache');
+            header('Expires: ' . gmdate('D, d M Y H:i:s', 0) . ' GMT');
+            header("Content-Type: application/json\n");
+
             echo json_encode($data, JSON_UNESCAPED_SLASHES
                 | (optional_param('pretty', false, PARAM_BOOL) || (is_array($data) && !empty($data['type']) && $data['type'] == 'error') ? JSON_PRETTY_PRINT : 0));
             exit;
@@ -1237,87 +1264,106 @@ class table_sql extends moodle_table_sql {
         try {
             $table_sql_action = optional_param('table_sql_action', '', PARAM_TEXT);
 
-            // only needed in dev!
-            if ($table_sql_action == 'get_config') {
+            $ret = $this->handle_xhr_action($table_sql_action);
+            $json_output($ret);
+        } catch (\Exception $e) {
+            if (has_capability('moodle/site:config', \context_system::instance())) {
+                // more debug output for admin
                 $json_output([
-                    'type' => 'success',
-                    'data' => $this->get_config(),
+                    'type' => 'error',
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                    'exception' => $e,
                 ]);
-                return;
-            }
-
-            if ($table_sql_action == 'set_selected') {
-                $row_ids_selected = array_filter(explode(',', required_param('row_ids_selected', PARAM_TEXT)));
-                $row_ids_unselected = array_filter(explode(',', required_param('row_ids_unselected', PARAM_TEXT)));
-
-                $session_info = $this->get_session_info();
-
-                // add new selections
-                $selected_rowids = $session_info->selected_rowids ?: [];
-                foreach ($row_ids_selected as $id) {
-                    $selected_rowids[] = $id;
-                }
-
-                // remove newly unselected items
-                $selected_rowids = array_filter($selected_rowids, function($id) use ($row_ids_unselected) {
-                    return !in_array($id, $row_ids_unselected);
-                });
-
-                // remove duplicates, if added twice
-                $selected_rowids = array_unique($selected_rowids);
-                $selected_rowids = array_values($selected_rowids);
-
-                $session_info = $this->get_session_info();
-                $session_info->selected_rowids = $selected_rowids;
-                $session_info->selection_last_changed = time();
-
+            } else {
                 $json_output([
-                    'meta' => [
-                        'selected_rows_count' => count($selected_rowids),
-                    ],
+                    'type' => 'error',
+                    'error' => 'Leider ist ein Fehler beim Laden der Daten aufgetreten!',
+                    'exception' => get_class($e),
                 ]);
-                return;
+            }
+        }
+    }
+
+    protected function handle_xhr_action(string $action) {
+        // only needed in dev!
+        if ($action == 'get_config') {
+            return [
+                'type' => 'success',
+                'data' => $this->get_config(),
+            ];
+        }
+
+        if ($action == 'set_selected') {
+            $row_ids_selected = array_filter(explode(',', required_param('row_ids_selected', PARAM_TEXT)));
+            $row_ids_unselected = array_filter(explode(',', required_param('row_ids_unselected', PARAM_TEXT)));
+
+            $session_info = $this->get_session_info();
+
+            // add new selections
+            $selected_rowids = $session_info->selected_rowids ?: [];
+            foreach ($row_ids_selected as $id) {
+                $selected_rowids[] = $id;
             }
 
-            if ($table_sql_action == 'select_all') {
-                $this->setup();
+            // remove newly unselected items
+            $selected_rowids = array_filter($selected_rowids, function($id) use ($row_ids_unselected) {
+                return !in_array($id, $row_ids_unselected);
+            });
 
-                $this->currpage = 0;
-                $this->pagesize = 999999;
+            // remove duplicates, if added twice
+            $selected_rowids = array_unique($selected_rowids);
+            $selected_rowids = array_values($selected_rowids);
 
-                $this->query_db(999999, false);
+            $session_info = $this->get_session_info();
+            $session_info->selected_rowids = $selected_rowids;
+            $session_info->selection_last_changed = time();
 
-                $session_info = $this->get_session_info();
+            return [
+                'meta' => [
+                    'selected_rows_count' => count($selected_rowids),
+                ],
+            ];
+        }
 
-                $selected_rowids = $session_info->selected_rowids;
-                foreach ($this->rawdata as $row) {
-                    $selected_rowids[] = $row->id;
-                }
+        if ($action == 'select_all') {
+            $this->setup();
 
-                // remove duplicates, if added twice
-                $selected_rowids = array_unique($selected_rowids);
-                $selected_rowids = array_values($selected_rowids);
+            $this->currpage = 0;
+            $this->pagesize = 999999;
 
-                $session_info->selected_rowids = $selected_rowids;
-                $session_info->selection_last_changed = time();
+            $this->query_db(999999, false);
 
-                $json_output([
-                    'meta' => [
-                        'selected_rows_count' => count($selected_rowids),
-                    ],
-                ]);
-                return;
+            $session_info = $this->get_session_info();
+
+            $selected_rowids = $session_info->selected_rowids;
+            foreach ($this->rawdata as $row) {
+                $selected_rowids[] = $row->id;
             }
 
-            if ($table_sql_action == 'select_none') {
-                $session_info = $this->get_session_info();
-                $session_info->selected_rowids = [];
-                $session_info->selection_last_changed = time();
+            // remove duplicates, if added twice
+            $selected_rowids = array_unique($selected_rowids);
+            $selected_rowids = array_values($selected_rowids);
 
-                $json_output(true);
-                return;
-            }
+            $session_info->selected_rowids = $selected_rowids;
+            $session_info->selection_last_changed = time();
 
+            return [
+                'meta' => [
+                    'selected_rows_count' => count($selected_rowids),
+                ],
+            ];
+        }
+
+        if ($action == 'select_none') {
+            $session_info = $this->get_session_info();
+            $session_info->selected_rowids = [];
+            $session_info->selection_last_changed = time();
+
+            return true;
+        }
+
+        if ($action == 'list') {
             $this->pagesize = optional_param('page_size', 0, PARAM_INT) ?: $this->pagesize;
 
             $this->_out();
@@ -1333,8 +1379,11 @@ class table_sql extends moodle_table_sql {
             foreach ($rows as $row_i => &$row) {
                 $originalRow = $rawdata[$row_i];
 
+                // disabled: if value is a link, parse it for React Table
+                // i think this was needed, because of the material-react-table highlighting logic
+                // but with the new highlighting logic, all content can be highlighted properly
+                /*
                 foreach ($row as &$col_value) {
-                    // if value is a link, parse it for React Table
                     if (is_string($col_value) && preg_match('!^<a\s[^>]*href=("(?<link1>[^"]*)"|\'(?<link2>[^\']*)\')[^>]*>(?<content>[^<]*)</a>$!i', trim($col_value), $matches)) {
                         if (preg_match('!^\s*<a\s[^>]*target=("(?<target1>[^"]*)"|\'(?<target2>[^\']*)\')!i', trim($col_value), $matches_target)) {
                             $target = $matches_target['target1'] ?? $matches_target['target2'] ?? '';
@@ -1349,6 +1398,7 @@ class table_sql extends moodle_table_sql {
                         ];
                     }
                 }
+                */
 
                 if (!isset($this->columns['id']) && !empty($originalRow->id)) {
                     $row['id'] = $originalRow->id;
@@ -1364,12 +1414,19 @@ class table_sql extends moodle_table_sql {
                     $row['_data']->detail_panel_content = $this->render_detail_panel_content($originalRow);
                 }
 
-                // clone everything, so the original objects don't get modified!
-                $row_actions = unserialize(serialize($this->row_actions));
+                $row_actions = $this->get_row_actions_v2($originalRow);
 
-                $row_actions = $this->get_row_actions($originalRow, $row_actions);
+                $row_actions = $this->get_row_actions($originalRow, $row_actions) ?: $row_actions;
 
-                if ($row_actions !== null) {
+                // fix data_type
+                foreach ($row_actions as $row_action) {
+                    if (isset($row_action->disabled)) {
+                        // '0' is false in php, but true in javascript
+                        $row_action->disabled = (bool)$row_action->disabled;
+                    }
+                }
+
+                if (json_encode($row_actions) !== json_encode($this->row_actions)) {
                     // remove all attributes, which are the same
                     foreach ($row_actions as $row_action) {
                         if (empty($row_action->id)) {
@@ -1416,9 +1473,14 @@ class table_sql extends moodle_table_sql {
 
                     $row['_data']->row_actions = $row_actions;
                 }
+
+                // remove _data if empty
+                if (!(array)$row['_data']) {
+                    unset($row['_data']);
+                }
             }
 
-            $json_output([
+            return [
                 'type' => 'success',
                 'meta' => [
                     'total' => $this->totalrows,
@@ -1428,24 +1490,10 @@ class table_sql extends moodle_table_sql {
                 ],
                 'data' => $rows,
                 // 'rawdata' => $this->rawdata,
-            ]);
-        } catch (\Exception $e) {
-            if (has_capability('moodle/site:config', \context_system::instance())) {
-                // more debug output for admin
-                $json_output([
-                    'type' => 'error',
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                    'exception' => $e,
-                ]);
-            } else {
-                $json_output([
-                    'type' => 'error',
-                    'error' => 'Leider ist ein Fehler beim Laden der Daten aufgetreten!',
-                    'exception' => get_class($e),
-                ]);
-            }
+            ];
         }
+
+        throw new \moodle_exception('unknown action: ' . $action);
     }
 
     private function get_session_info() {
@@ -1504,5 +1552,11 @@ class table_sql extends moodle_table_sql {
         $this->baseurl = $orig_baseurl;
 
         return $output;
+    }
+
+    protected function get_current_row(): ?object {
+        $row = isset($this->rawdata) ? array_values($this->rawdata)[count($this->xhr_formatted_data)] : null;
+
+        return $row;
     }
 }

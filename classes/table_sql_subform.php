@@ -24,27 +24,43 @@
 namespace local_table_sql;
 
 use moodleform;
-use local_classregister\lesson\incidents_table;
-use local_classregister\locallib;
 
 defined('MOODLE_INTERNAL') || die;
 
 require_once($CFG->libdir . "/formslib.php");
 
+/**
+ * Base class for subforms of table_sql.\
+ * @method void store_row(object $data) Implement this method to store the data of the subform.
+ * @method object get_row(int $id) Implement this method to get the data of the subform.
+ */
 abstract class table_sql_subform extends moodleform {
-    protected array $errors = [];
-    protected bool $requirereload = false;
-
-    public function __construct(protected $action=null, $customdata=null, protected $method='post', protected $target='', protected $attributes=null,
-                                protected $editable=true, protected $ajaxformdata=null, protected array $rowselector = []) {
+    public function __construct(protected $action = null, $customdata = null, protected $method = 'post', protected $target = '', protected $attributes = null,
+        protected $editable = true, protected $ajaxformdata = null, protected array $rowselector = [], protected string $title = '') {
         parent::__construct($action, $customdata, $method, $target, $attributes, $editable, $ajaxformdata);
     }
-    function definition() {}
 
+    // Info: buttons get removed in javascript, so actually a moodleform can be used for the subform
+    // public function table_sql_form_prepare_output($fields) {
+    //     // remove buttons for xhr form, buttons are printed in the popup window
+    //     if ($this->_form->elementExists('buttonar')) {
+    //         $this->_form->removeElement('buttonar');
+    //     }
+    //     if ($this->_form->elementExists('submitbutton')) {
+    //         $this->_form->removeElement('submitbutton');
+    //     }
+    // }
+
+    /**
+     * Reset the definition of a form, so that it can be customized for a particular record.
+     * this function is copied from moodleform::__construct()
+     * @return void
+     * @throws \moodle_exception
+     */
     protected function definition_reset() {
-
+        // this function is copied from moodleform::__construct()
         $this->_form = new \MoodleQuickForm($this->_formname, $this->method, $this->action, $this->target, $this->attributes, $this->ajaxformdata);
-        if (!$this->editable){
+        if (!$this->editable) {
             $this->_form->hardFreeze();
         }
 
@@ -53,9 +69,9 @@ abstract class table_sql_subform extends moodleform {
         $this->_form->addElement('hidden', 'sesskey', null); // automatic sesskey protection
         $this->_form->setType('sesskey', PARAM_RAW);
         $this->_form->setDefault('sesskey', sesskey());
-        $this->_form->addElement('hidden', '_qf__'.$this->_formname, null);   // form submission marker
-        $this->_form->setType('_qf__'.$this->_formname, PARAM_RAW);
-        $this->_form->setDefault('_qf__'.$this->_formname, 1);
+        $this->_form->addElement('hidden', '_qf__' . $this->_formname, null);   // form submission marker
+        $this->_form->setType('_qf__' . $this->_formname, PARAM_RAW);
+        $this->_form->setDefault('_qf__' . $this->_formname, 1);
         $this->_form->_setDefaultRuleMessages();
 
         // Hook to inject logic after the definition was provided.
@@ -65,92 +81,26 @@ abstract class table_sql_subform extends moodleform {
         $this->_process_submission($this->method);
     }
 
-    /**
-     * Transform the data transmitted via ajax to the receiver into a format,
-     * that the moodleform supports.
-     * @param object $rowdata
-     * @return null
-     */
-    public static function prepare_ajax_data(object $rowdata) {
-        foreach ($rowdata->rowids as $field => $value) {
-            $_POST[$field] = $value;
+    protected function get_form_identifier() {
+        // for anonymous clases the classname changes on each reload and so the formid changes too
+        // and thus the POST request is not recognized as a form submission
+        $reflectionClass = new \ReflectionClass($this);
+        if ($reflectionClass->isAnonymous()) {
+            // Get the file and line where the anonymous class is defined
+            $file = $reflectionClass->getFileName();
+            $startLine = $reflectionClass->getStartLine();
+            return 'anonymous_' . md5($file . ':' . $startLine);
         }
-        if (!empty($rowdata->formdata)) {
-            //foreach ($rowdata->formdata as $field => $value) {
-            foreach ($rowdata->formdata as $data) {
-                $field = $data->name;
-                $value = $data->value;
-                $matches_unnamed = [];
-                $matches_named = [];
-                // Unnamed arrays
-                preg_match('/^(.+)\[\]$/', $field, $matches_unnamed);
-                preg_match('/^(.+)\[(.+)\]$/', $field, $matches_named);
-                // Normal values
-                if (empty($matches_unnamed[0]) && empty($matches_named[0])) {
-                    $_POST[$field] = $value;
-                    continue;
-                }
-                if ($matches_unnamed[0] == $field) {
-                    if (!is_array($_POST[$matches_unnamed[1]])) {
-                        $_POST[$matches_unnamed[1]] = [];
-                    }
-                    $_POST[$matches_unnamed[1]][] = $value;
-                    continue;
-                }
-                // Named arrays
-                if ($matches_named[0] == $field) {
-                    if (!is_array($_POST[$matches_named[1]])) {
-                        $_POST[$matches_named[1]] = [];
-                    }
-                    $_POST[$matches_named[1]][$matches_named[2]] = $value;
-                    continue;
-                }
-            }
-        }
+
+        return parent::get_form_identifier();
     }
-
-    /**
-     * Return all errors after a validation from the protected _form-object.
-     * @return void
-     */
-    function get_errors(): array {
-        return $this->_form->_errors;
-    }
-
-    /**
-     * Provide a function to get a single object for this form.
-     * The protected $rowselector contains additional fields to ensure, that only
-     * such values are loaded from the database, that the containing table_sql provides access to.
-     * An implementation can be e.g.
-     *      global $DB;
-     *      $selector = array_merge($selector, $this->rowselector);
-     *      return $DB->get_record('local_myplugin', $selector);
-     * @param array $selector
-     * @return object|null
-     */
-    abstract public function get_row(array $selector): ?object;
-
-    /**
-     * Indicate if a change within a form requires a reload of the table.
-     * @return bool
-     */
-    public function requires_reload(): bool {
-        return $this->requirereload;
-    }
-
-    /**
-     * Provide a function to store a single object based in this form.
-     * @param array $data
-     * @return object|null
-     */
-    abstract public function store_row(object $data): ?object;
 
     /**
      * Checks if the row-identifying values $this->rowselectore have not changed.
      * @param array $data
      * @return bool
      */
-    protected function store_row_check(object $data, bool $exception = false): bool {
+    protected function store_row_check(object $data, bool $exception = true): bool {
         foreach ($this->rowselector as $requiredfield => $requiredvalue) {
             if ($data->{$requiredfield} != $requiredvalue) {
                 if ($exception) {
@@ -164,5 +114,21 @@ abstract class table_sql_subform extends moodleform {
             }
         }
         return true;
+    }
+
+    /**
+     * @param $title
+     * @return void
+     */
+    public function set_title($title): void {
+        $this->title = $title;
+    }
+
+    public function get_title(): string {
+        return $this->title;
+    }
+
+    public function _getDefaultValues() {
+        return $this->_form->_defaultValues;
     }
 }

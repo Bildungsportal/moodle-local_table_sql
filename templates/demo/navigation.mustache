@@ -16,16 +16,11 @@
  }}
 
 
-<div class="fitem table-sql-modal d-flex" data-modaldata="{{modaldata}}" style="overflow: hidden; text-overflow: ellipsis;">
-    <a href="#" class="{{btnclass}}" onclick="var _this = this; require(['local_table_sql/form'], function(f) { f.loadModal(_this); }); return false;"
-       style="margin-right: 5px;">
-        <i class="{{icon}}"></i>
-        <span class="{{btnlabelclass}} {{#btnlabelisvalue}}table-sql-modal-value{{/btnlabelisvalue}}"
-              {{#btnlabelisvalue}}old-data-col="{{col}}"{{/btnlabelisvalue}}>
-            {{{btnlabel}}}
-        </span>
+<div class="local_table_sql demo navigation">
+    <a href="{{cfg.wwwroot}}/local/table_sql/demo/index.php" class="btn btn-link">
+        Table-SQL
     </a>
-    <div>
-        <div class="table-sql-modal-value">{{{content}}}</div>
-    </div>
+    <a href="{{cfg.wwwroot}}/local/table_sql/demo/table_form.php" class="btn btn-link">
+        Table-SQL with forms
+    </a>
 </div>

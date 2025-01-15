@@ -2,27 +2,25 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
-import reportWebVitals from './reportWebVitals';
-import { AppContext } from 'lib/context';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fetchWithParams } from 'lib/helpers';
-import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import {AppContext} from 'lib/context';
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
+import {fetchWithParams} from 'lib/helpers';
+import {AdapterDayjs} from '@mui/x-date-pickers/AdapterDayjs';
+import {LocalizationProvider} from '@mui/x-date-pickers/LocalizationProvider';
 
 import 'dayjs/locale/de'; // needed for german locale
-
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 
 // needed for .tz() function
-dayjs.extend(utc)
-dayjs.extend(timezone)
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const queryClient = new QueryClient();
 
 function table_sql_start(config) {
-  let { container } = config;
+  let {container} = config;
   let containerElement;
 
   if (typeof container == 'string') {
@@ -36,15 +34,24 @@ function table_sql_start(config) {
 
   config.containerElement = containerElement;
 
+  // make the url for xhr calls
+  if (!(config.url instanceof URL)) {
+    if (config.url) {
+      config.url = new URL(config.url, document.location.href);
+    } else {
+      config.url = new URL(document.location.href);
+    }
+  }
+
   let tableElement = containerElement.querySelector('.table-sql-container') || container;
 
   const root = ReactDOM.createRoot(tableElement as HTMLElement);
   root.render(
     <React.StrictMode>
-      <AppContext.Provider value={{ config }}>
+      <AppContext.Provider value={{config}}>
         <QueryClientProvider client={queryClient}>
           <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale={config.current_language}>
-            <App />
+            <App/>
           </LocalizationProvider>
         </QueryClientProvider>
       </AppContext.Provider>
@@ -58,9 +65,21 @@ function table_sql_start(config) {
 };
 
 if (process.env.NODE_ENV == 'development') {
+  // const url = new URL('http://localhost/moodle/local/eduportal/org/students.php?orgid=900001');
+  // const url = new URL('/moodle/local/table_sql/demo/deliveries.php?orgid=900001', 'http://localhost/');
+  const url = new URL('/moodle/local/table_sql/demo/index.php?orgid=900001', 'http://localhost/');
+  // const url = new URL('/moodle/local/leseguetesiegel/jury/submissions.php', 'http://localhost/');
+  // const url = new URL('/moodle/blocks/edupublisher/pages/etapas.php', 'http://localhost/');
+
+  // cors error
+  // const url = new URL('/moodle/local/delivery/deliveries.php?orgid=900001', 'http://localhost/');
+
+  // not working anymore
+  // const url = new URL('/moodle/local/eduportal/demo/user_selector_table_sql.php?orgids=900027,900001,900023', 'http://localhost/');
+
   if (true) {
     (async () => {
-      let result = await fetchWithParams({
+      let result = await fetchWithParams(url, {
         uniqueid: '',
         table_sql_action: 'get_config',
       });
@@ -69,6 +88,7 @@ if (process.env.NODE_ENV == 'development') {
         table_sql_start({
           container: '#table-sql-dev',
           ...result.data,
+          url: result.data.url || url,
         });
         return result.data;
       } else {

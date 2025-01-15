@@ -1,29 +1,14 @@
-export async function fetchWithParams(params) {
-  let fetchURL: URL;
-  if (process.env.NODE_ENV === 'development') {
-    // fetchURL = new URL('http://localhost/moodle41/local/eduportal/org/students.php?orgid=900001');
-    // fetchURL = new URL('/moodle41/local/table_sql/demo/deliveries.php?orgid=900001', 'http://localhost/');
-    fetchURL = new URL('/moodle41/local/table_sql/demo/index.php?orgid=900001', 'http://localhost/');
-
-    // cors error
-    // fetchURL = new URL('/moodle41/local/delivery/deliveries.php?orgid=900001', 'http://localhost/');
-
-    // not working anymore
-    // fetchURL = new URL('/moodle41/local/eduportal/demo/user_selector_table_sql.php?orgids=900027,900001,900023', 'http://localhost/');
-  } else {
-    fetchURL = new URL(document.location.href);
-  }
-
-  fetchURL.searchParams.set('is_xhr', '1');
+export async function fetchWithParams(url: URL, params: object) {
+  url.searchParams.set('is_xhr', '1');
 
   for (const key in params) {
     if (params[key] === undefined || params[key] === null) {
       continue;
     }
-    fetchURL.searchParams.set(key, params[key]);
+    url.searchParams.set(key, params[key]);
   }
 
-  const response = await fetch(fetchURL.href, {
+  const response = await fetch(url.href, {
     credentials: 'include',
   });
   return response.json();
@@ -87,4 +72,54 @@ export function debounce(func, delay, option = { leading: false, trailing: true 
       timer = null; // reset timer
     }, delay);
   };
+}
+
+/**
+ * Escape HTML special characters.
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeHTML(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+/**
+ * Escape regular expression special characters.
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function highlightNodes(root, highlight) {
+  const searchParts = highlight.toLowerCase().split(/\s+/);
+  const escapedStr = searchParts.map((part) => escapeRegExp(escapeHTML(part))).join('|');
+  const regexp = new RegExp(`(${escapedStr})`, 'gi');
+
+  const elements = [root, ...root.querySelectorAll('*')];
+  elements.forEach((element) => {
+    if (element.childNodes.length === 1 && element.childNodes[0].nodeType === Node.TEXT_NODE) {
+      const modifiedText = element.textContent.replace(regexp, '<mark>$1</mark>');
+      if (modifiedText != element.textContent) {
+        element.innerHTML = modifiedText;
+      }
+    } else {
+      element.childNodes.forEach((child) => {
+        if (child.nodeType === Node.TEXT_NODE) {
+          if (child.textContent.match(regexp)) {
+            const modifiedText = child.textContent.replace(regexp, '<mark>$1</mark>');
+            if (modifiedText != child.textContent) {
+              // Create a span element to hold the new HTML content
+              const span = document.createElement('span');
+              span.innerHTML = modifiedText;
+
+              // Replace the original text node with the new span element
+              element.replaceChild(span, child);
+            }
+          }
+        }
+      });
+    }
+  });
 }

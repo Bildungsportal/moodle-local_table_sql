@@ -1,139 +1,196 @@
-define(
-    ['jquery', 'core/ajax', 'core/modal_factory', 'core/modal_events', 'core/notification'],
-    function ($, Ajax, ModalFactory, ModalEvents, Notification){
-        return {
-            debug: false,
-            /**
-             * load the form into a modal by use of ajax.
-             * @param {DOMobject} sender
-             * @param {string} formid
-             */
-            loadModal: function(sender, formid) {
-                let SELF = this;
+/* eslint-disable */
+import $ from 'jquery';
+import ModalFactory from 'core/modal_factory';
+import ModalEvents from 'core/modal_events';
+import Notification from 'core/notification';
 
-                // Parameters needed to construct the table_sql_form.
-                let cb = $(sender).closest('div.table_sql_form_controlbox');
-                let constructor = cb.data('constructor');
-                constructor = atob(cb.data('constructor'));
-                let params = {
-                    'classname': atob(cb.data('classname')),
-                    'constructor': JSON.parse(constructor),
-                    'col': $(sender).closest('.table-sql-modal').find('.table-sql-modal-value').data('col'),
-                    'formid': formid
-                };
+var debug = false;
 
-                // Values needed to construct the moodleform.
-                let pane = $(sender).closest('.table-sql-modal');
-                params['rowids'] = {};
 
-                $(pane).find('.table-sql-modal-rowids .dataset').each(function(){
-                    let field = $(this).data('field');
-                    let value = $(this).html();
-                    params['rowids'][field] = value;
-                });
-                if (SELF.debug) {
-                    console.log('Loading modal for params', params);
-                }
-                let ajaxdata = { 'rowdata': JSON.stringify(params) };
-                Ajax.call([{
-                    methodname: 'local_table_sql_receiver',
-                    args: ajaxdata,
-                    done: function (response) {
-                        if (SELF.debug) {
-                            console.log('Response', response);
-                        }
-                        ModalFactory.create(
-                            {
-                                body: response.form,
-                                large: true,
-                                removeOnClose: true,
-                                title: $(pane).data('title'),
-                                type: ModalFactory.types.SAVE_CANCEL,
-                            }
-                        ).then(
-                            function (modal) {
-                                SELF.updateModal(params, modal, response, pane);
-                                modal.show();
-                                modal.getRoot().on(ModalEvents.save, (e) => {
-                                    e.preventDefault();
-                                    SELF.send(params, modal, pane);
-                                });
-                            }
-                        );
-                    },
-                    fail: Notification.exception
-                }]);
-            },
-            /**
-             * Update modal if a form was loaded into it.
-             * @param {object} params
-             * @param {object} modal
-             * @param {object} response
-             * @param {DOMobject} pane
-             */
-            updateModal: function(params, modal, response, pane) {
-                let SELF = this;
-                // Update modal content or close it.
-                if (response.form == '') {
-                    $(modal.getRoot()).find('.modal-body').html('');
-                    $(pane).replaceWith($(response.colreplace));
-                    modal.hide();
-                } else if (response.form != '') {
-                    $(modal.getRoot()).find('.modal-body').html(response.form);
-                }
-                // Hide fields we do not need.
-                let showfields = JSON.parse(atob($(pane).data('fields')));
-                if (SELF.debug) {
-                    console.log('showfields', showfields);
-                }
-                let form = $(modal.getRoot()).find('form');
-                $(form).find('#id_submitbutton').closest('.form-group.row').addClass('hidden');
-                if (showfields.length > 0) {
-                    $(form).find('[name]').each(function () {
-                        let name = $(this).attr('name');
-                        if (showfields.indexOf(name) === -1) {
-                            $(this).closest('.form-group.row').addClass('hidden');
-                        }
-                    });
-                }
-                // Run any required javascript.
-                if (typeof response.pageendcode !== 'undefined') {
-                    let script = $('<script>').data('added', Date.now()).html(response.pageendcode);
-                    if (SELF.debug) {
-                        console.log('appending page end code', script);
-                    }
-                    $('body').append(script);
-                }
-            },
-            /**
-             * Actually send the data. Depending on the result. update the form or close the modal and update the cell.
-             * @param {object} params
-             * @param {object} modal
-             * @param {DOMobject} pane
-             *
-             *
-             */
-            send: function(params, modal, pane) {
-                let SELF = this;
-                let sendparams = params;
-                let form = $(modal.getRoot()).find('form');
-                sendparams['formdata'] = $(form).serializeArray();
-                if (SELF.debug) {
-                    console.log('Store row', sendparams);
-                }
-                sendparams = { 'rowdata': JSON.stringify(sendparams) };
-                Ajax.call([{
-                    methodname: 'local_table_sql_receiver',
-                    args: sendparams,
-                    done: function (response) {
-                        if (SELF.debug) {
-                            console.log('Response', response);
-                        }
-                        SELF.updateModal(params, modal, response, pane);
-                    },
-                    fail: Notification.exception
-                }]);
-            }
-        };
+async function xhrRequest(xhrdata) {
+  try {
+    return await $.post(document.location.href, xhrdata);
+  } catch (e) {
+    var error = '';
+
+    // if the error is a html output get the error from the html code
+    if (e.responseText && typeof e.responseText == 'string' && e.responseText[0] === '<') {
+      error = $(e.responseText).find('.errormessage').text();
     }
-);
+
+    if (!error) {
+      error = 'Unknown error!';
+    }
+
+    Notification.exception(new Error(error));
+
+    throw e;
+  }
+}
+
+/**
+ * load the form into a modal by use of ajax.
+ * @param {DOMobject} sender
+ * @param {object} modaldata
+ */
+export async function loadModal(sender, modaldata = null) {
+  const $pane = $(sender).closest('.table-sql-modal');
+  modaldata = modaldata || $pane.data('modaldata');
+
+  const xhrdata = {
+    ...modaldata.xhrdata,
+    is_xhr: 1,
+    table_sql_action: 'form_show'
+  };
+
+  if (debug) {
+    console.log('Loading modal for params', xhrdata);
+  }
+
+  var response = await xhrRequest(xhrdata);
+
+  ModalFactory.create({
+    // body gets set in updateModal()
+    body: '', // response.form,
+    large: true,
+    removeOnClose: true,
+    title: response.modal_title,
+    type: ModalFactory.types.SAVE_CANCEL,
+  }).then(function (modal) {
+    updateModal(modaldata, modal, response, $pane);
+    modal.show();
+    modal.getRoot().on(ModalEvents.save, (e) => {
+      e.preventDefault();
+      send(modaldata, modal, $pane);
+    });
+
+    // TODO: on cancel remove modal?!?
+  });
+}
+
+/**
+ * Update modal if a form was loaded into it.
+ * @param {object} modaldata
+ * @param {object} modal
+ * @param {object} response
+ * @param {DOMobject} pane
+ */
+function updateModal(modaldata, modal, response, $pane) {
+  $(modal.getRoot()).find('.modal-body').html(response.form);
+
+  // set default values
+  for (const [key, value] of Object.entries(modaldata.values || [])) {
+    $(modal.getRoot()).find('input[type="text"], select, textarea').filter('[name=\"' + key + '\"], select[name=\"' + key + '\"]').val(value);
+    $(modal.getRoot()).find('radio[name=\"' + key + '\"][value=\"' + value + '\"').prop('checked', true);
+  }
+
+  let showfields = modaldata.showfields;
+
+  let $form = $(modal.getRoot()).find('form');
+
+  // only show the field of the current column
+  // if (showfields && showfields.length == 0) {
+  //   // Find the closest element and filter for the class starting with 'local_table_sql-column-'
+  //   var closestNode = $pane.closest('[class*="local_table_sql-column-"]');
+  //
+  //   // Extract the column name by matching the class pattern
+  //   var columnName = closestNode.attr('class')?.match(/local_table_sql-column-(\S+)/)?.[1];
+  //
+  //   if (columnName) {
+  //     if ($form.find('input[name="' + columnName + '"]').length) {
+  //       // column exists, hide all others
+  //       showfields = [columnName];
+  //     }
+  //   }
+  // }
+
+  if (showfields && showfields.length > 0) {
+    $form.find('[name]').each(function () {
+      let name = $(this).attr('name');
+      if (showfields.indexOf(name) === -1) {
+        $(this).closest('.row')
+          .not('.has-danger') // bei einem Fehler dieses Feld nicht ausblenden
+          .addClass('hidden');
+      }
+    });
+  }
+
+  // remove the button row
+  $form.find('#id_submitbutton').closest('.row').remove();
+  // add own submit, so the form can get submitted
+  $form.append('<input type="submit"  class="hidden"/>');
+  $form.submit(function (e) {
+    // prevent submit post
+    e.preventDefault();
+
+    // trigger modal event
+    modal.getRoot().trigger(ModalEvents.save);
+  });
+
+  // Run any required javascript.
+  if (response.pageendcode) {
+    let script = $('<script>').data('added', Date.now()).html(response.pageendcode);
+    if (debug) {
+      console.log('appending page end code', script);
+    }
+    $('body').append(script);
+  }
+}
+
+/**
+ * Actually send the data. Depending on the result. update the form or close the modal and update the cell.
+ * @param {object} modaldata
+ * @param {object} modal
+ * @param {DOMobject} $pane
+ *
+ *
+ */
+async function send(modaldata, modal, $pane) {
+  let form = $(modal.getRoot()).find('form');
+
+  const xhrdata = {
+    ...modaldata.xhrdata,
+    ...$(form).serializeArray().reduce(function (obj, item) {
+      // for arrays (multiselect etc.) use an array
+      if (item.name.match(/\[\]$/)) {
+        if (!obj[item.name]) {
+          obj[item.name] = [];
+        }
+        obj[item.name].push(item.value);
+      } else {
+        obj[item.name] = item.value;
+      }
+
+      return obj;
+    }, {}),
+    is_xhr: 1,
+    table_sql_action: 'form_save'
+  };
+  if (debug) {
+    console.log('Store row', xhrdata);
+  }
+
+  var response = await xhrRequest(xhrdata);
+  if (debug) {
+    console.log('Response', response);
+  }
+
+  if (response.form) {
+    // there was an error, show form again
+    updateModal(modaldata, modal, response, $pane);
+    return;
+  }
+
+  // remove the modal content (the form), so it doesn't trigger any "do you want to save?" alerts
+  $(modal.getRoot()).find('.modal-body').html('');
+
+  if ($pane.length && response.colreplace) {
+    // replacing single value in table
+    $pane.replaceWith($(response.colreplace));
+  } else {
+    // reload the table
+    window.table_sql_reload();
+  }
+
+  modal.hide();
+}

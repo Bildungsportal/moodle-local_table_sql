@@ -28,7 +28,7 @@ export const useAppConfig = () => {
 };
 
 export function useFetchWithParams() {
-  const { uniqueid } = useAppConfig();
+  const { uniqueid, url } = useAppConfig();
 
-  return (params) => fetchWithParams({ uniqueid, ...params });
+  return (params) => fetchWithParams(url, { uniqueid, ...params });
 }

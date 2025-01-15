@@ -39,6 +39,8 @@ function xmldb_local_table_sql_upgrade($oldversion) {
         if (!$dbman->table_exists($table)) {
             $dbman->create_table($table);
         }
+
+        // TODO: add this into install.php
         for ($a = 0; $a < 60; $a++) {
             $record = [
                 'timecreated' => strtotime("-{$a} weeks"),
@@ -49,6 +51,27 @@ function xmldb_local_table_sql_upgrade($oldversion) {
             $DB->insert_record('local_table_sql_demo', $record);
         }
         upgrade_plugin_savepoint(true, 2024013100, 'local', 'table_sql');
+    }
+
+    // always check timezone after upgrade (TODO: add this to install.php)
+    // correct timezone conversion is needed, so the fulltext search on timestamp columns works in mysql
+    if ($DB->get_dbfamily() == 'mysql') {
+        $result = $DB->get_field_sql("SELECT CONVERT_TZ(FROM_UNIXTIME(?), 'SYSTEM', 'Europe/Berlin')", [time()]);
+        if (!$result || str_starts_with($result, '1970')) {
+            // empty conversion, or converted to 1970-01-01 01:00:00
+
+            $error = 'Timezone Europe/Berlin not installed, check result: ' . $result;
+
+            // don't throw the error, else the upgrade won't run through
+            // throw new \moodle_exception($error);
+
+            // instead print it
+            ?>
+            <div class="box py-3 errorbox alert alert-danger">
+                <p class="errormessage"><?=$error?></p>
+            </div>
+            <?php
+        }
     }
 
     return true;
