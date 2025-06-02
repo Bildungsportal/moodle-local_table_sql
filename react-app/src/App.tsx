@@ -20,7 +20,7 @@ import { Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import './App.scss';
 import { useAppConfig, useFetchWithParams } from 'lib/hooks';
-import { convertSnakeCaseToCamelCase, debounce, highlightNodes, replacePlaceholders, stringToFunction } from 'lib/helpers';
+import { convertSnakeCaseToCamelCase, debounce, highlightNodes, replacePlaceholders, sleep, stringToFunction } from 'lib/helpers';
 import { useLocalization } from 'lib/localization';
 import dayjs from 'dayjs';
 
@@ -201,7 +201,7 @@ function useColumnDef({ getColumn, tableConfig }) {
             minSize: 10,
             columnFilterModeOptions:
               column.mrtOptions.filterVariant == 'multi-select'
-                ? ['contains', 'between']
+                ? ['equals']
                 : column.mrtOptions.filterVariant == 'range-slider'
                 ? ['between']
                 : column.data_type == 'timestamp'
@@ -265,9 +265,9 @@ function useColumnDef({ getColumn, tableConfig }) {
             enableColumnFilterModes: column.data_type != 'timestamp',
             // filterVariant: 'multi-select',
             // filterSelectOptions: [
-            //   { text: 'Male', value: 'Male' },
-            //   { text: 'Female', value: 'Female' },
-            //   { text: 'Other', value: 'Other' },
+            //   { label: 'Male', value: 'Male' },
+            //   { label: 'Female', value: 'Female' },
+            //   { label: 'Other', value: 'Other' },
             // ],
             // geht nicht:
             // filterComponent: (props) => <div>Filte r123</div>
@@ -276,6 +276,14 @@ function useColumnDef({ getColumn, tableConfig }) {
           } as MRT_ColumnDef<TableRow>;
         })
     );
+
+    // test column.mrtOptions (kommt von PHP), ob die props korrekt sind (ggf. haben sie sich bei einer neuen Version von material-react-table geändert)
+    if (process.env.NODE_ENV == 'development') {
+      const tmp = {
+        filterVariant: 'multi-select',
+        filterSelectOptions: [{ label: 'label', value: 1 }],
+      } as MRT_ColumnDef<TableRow>;
+    }
   }, [tableConfig]);
 }
 
@@ -441,6 +449,114 @@ const App = (props) => {
         }
       })
     );
+  }, []);
+
+  // Accessibility: wenn eine Zelle markiert ist, dann bei Enter und Space den Link / Button klicken
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      const target = event.target as HTMLElement;
+      const isEnterOrSpace = event.key === 'Enter' || event.key === ' ';
+
+      // check if is a table cell
+      if (target.classList.contains('MuiTableCell-root') && isEnterOrSpace) {
+        // get button / link
+        const elements = target.querySelectorAll('a, button, input[type="button"]');
+        if (elements.length === 1) {
+          // only one element
+          (elements[0] as HTMLElement).click();
+        }
+      }
+    };
+
+    tableConfig.containerElement.addEventListener('keydown', handleKeyDown);
+
+    // Cleanup routine
+    return () => {
+      tableConfig.containerElement.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  // Accessibility: Bug: bei Filter button in Header wird das Menü nicht geöffnet, stattdessen wird die Tabelle sortiert
+  useEffect(() => {
+    function handleKeyDown(event) {
+      const target = event.target as HTMLElement;
+      const isEnterOrSpace = event.key === 'Enter' || event.key === ' ';
+
+      if (target.closest('.Mui-TableHeadCell-Content-Actions') && isEnterOrSpace) {
+        event.stopImmediatePropagation();
+      }
+    }
+
+    tableConfig.containerElement.addEventListener('keydown', handleKeyDown, true);
+
+    // Cleanup routine
+    return () => {
+      tableConfig.containerElement.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, []);
+
+  // Accessibility: Bug: switches (Spalten ein/ausblenden) funktionieren mit dem Keyboard nicht
+  useEffect(() => {
+    function handleKeyDown(event) {
+      const target = event.target as HTMLElement;
+      const isEnterOrSpace = event.key === 'Enter' || event.key === ' ';
+
+      if (target.classList.contains('MuiMenuItem-root') && target.closest('.MuiPopover-root') && target.querySelector('input[type="checkbox"]') && isEnterOrSpace) {
+        (target.querySelector('input[type="checkbox"]') as any).click();
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    // Cleanup routine
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  // Accessibility: Bug: Sortierung mittels space geht nicht, weil der event zwei mal feuert?!?
+  // https://github.com/BiP-org/moodle-local_table_sql/issues/118#issuecomment-2903472037
+  useEffect(() => {
+    function handleKeyDown(event) {
+      const target = event.target as HTMLElement;
+
+      if (target.closest('.MuiTableSortLabel-root') && event.key === ' ') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    // Cleanup routine
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, []);
+
+  // Accessibility: Bug: das popup menü im header löst bei enter/space auch die Sortierung aus
+  // https://github.com/BiP-org/moodle-local_table_sql/issues/118#issuecomment-2903472037
+  // Lösung: bei enter/space im popup menü wird die Sortierung 300ms verhindert
+  const shouldpreventResorting = useRef(false);
+  useEffect(() => {
+    async function handleKeyDown(event) {
+      const target = event.target as HTMLElement;
+      const isEnterOrSpace = event.key === 'Enter' || event.key === ' ';
+
+      if (target.closest('.MuiMenu-list') && isEnterOrSpace && !target.innerHTML.match(/sort/)) {
+        // ist eine liste, und kein Sortieren-Button in der Liste
+        shouldpreventResorting.current = true;
+        await sleep(300);
+        shouldpreventResorting.current = false;
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    // Cleanup routine
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
   }, []);
 
   const localization = useLocalization();
@@ -883,6 +999,7 @@ const App = (props) => {
   }, [JSON.stringify(eventData)]);
 
   const table = useMaterialReactTable<TableRow>({
+    // enableKeyboardShortcuts: false,
     columns: mrtColumns,
     data: data?.data ?? [], //data is undefined on first render
     positionPagination: 'both',
@@ -930,7 +1047,12 @@ const App = (props) => {
     onShowGlobalFilterChange: setShowGlobalFilter,
     onShowColumnFiltersChange: setShowColumnFilters,
     onPaginationChange: setPagination,
-    onSortingChange: setSorting,
+    onSortingChange: (...params) => {
+      if (shouldpreventResorting.current) {
+        return;
+      }
+      setSorting(...params);
+    },
     onColumnVisibilityChange: setColumnVisibility,
     renderTopToolbarCustomActions: () => (
       <div></div>

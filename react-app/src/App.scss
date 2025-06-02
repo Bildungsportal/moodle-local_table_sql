@@ -102,3 +102,35 @@ mark {
   max-width: 160px;
   padding-left: 2px;
 }
+
+// accessiblity
+
+.MuiTableCell-head {
+  .MuiTableSortLabel-root .MuiTableSortLabel-icon,
+  .Mui-TableHeadCell-Content-Actions .MuiIconButton-root {
+    color: black !important;
+  }
+  &[aria-sort='none'] .MuiTableSortLabel-root {
+    opacity: 0.6; // accessibility: mehr kontrast bei keiner Sortierung
+  }
+  &[aria-sort='none']:hover .MuiTableSortLabel-root {
+    opacity: 1; // accessibility: mehr kontrast bei keiner Sortierung
+  }
+  & .Mui-TableHeadCell-Content-Actions .MuiIconButton-root {
+    opacity: 0.6; // accessibility: mehr kontrast bei Aktionsbuttons
+  }
+  &:hover .Mui-TableHeadCell-Content-Actions .MuiIconButton-root {
+    opacity: 1; // accessibility: mehr kontrast bei Aktionsbuttons
+  }
+
+  // buttons in Spaltenheader größer machen (min 24x24 pixel)
+  .MuiTableSortLabel-root,
+  .Mui-TableHeadCell-Content-Actions .MuiIconButton-root {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+}
+
+.local_table_sql-column-mrt-row-actions .MuiIconButton-root:not(.Mui-disabled) {
+  color: black !important;
+}

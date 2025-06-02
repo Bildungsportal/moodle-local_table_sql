@@ -194,9 +194,7 @@ class table_sql extends moodle_table_sql {
         $this->define_headers(array_values($cols));
     }
 
-    protected function set_column_options($column, string $sql_column = null, array $select_options = null, string $data_type = null, bool $visible = null, bool $internal = null, bool $no_filter = null, bool $no_sorting = null, string $onclick = null, array|object $mrt_options = null) {
-        global $CFG;
-
+    protected function set_column_options($column, ?string $sql_column = null, ?array $select_options = null, ?string $data_type = null, ?bool $visible = null, ?bool $internal = null, ?bool $no_filter = null, ?bool $no_sorting = null, ?string $onclick = null, array|object|null $mrt_options = null, ?string $format = null) {
         if (!isset($this->columns[$column])) {
             throw new \moodle_exception("column $column not found");
         }
@@ -216,6 +214,10 @@ class table_sql extends moodle_table_sql {
                 throw new \moodle_exception("data_type {$data_type} is unknown, use the PARAM_* constants!");
             }
             $this->column_options[$column]['data_type'] = $data_type;
+        }
+
+        if ($format !== null) {
+            $this->column_options[$column]['format'] = $format;
         }
 
         if ($internal !== null) {
@@ -382,6 +384,10 @@ class table_sql extends moodle_table_sql {
             $default = "'" . addslashes(strip_tags($default)) . "'";
         }
 
+        if (!$values) {
+            return $default;
+        }
+
         $sql = "CASE " .
             join("\n", array_map(function($key, $value) use ($column, $DB) {
                 return "WHEN {$column}=" . (is_string($key) ? "'" . addslashes($key) . "'" : $key) . " THEN '" .
@@ -394,7 +400,7 @@ class table_sql extends moodle_table_sql {
         return $sql;
     }
 
-    protected function sql_format_timestamp(string $column, $format = '') {
+    protected function sql_format_timestamp(string $column, ?string $format = null) {
         global $DB;
 
         if (!$format) {
@@ -518,7 +524,7 @@ class table_sql extends moodle_table_sql {
                 $sql_column = $this->get_sql_column($column);
                 // timestamp columns need to formated as a string, so it can be searched (eg. 08.02.2024)
                 if (($this->column_options[$column]['data_type'] ?? '') == static::PARAM_TIMESTAMP) {
-                    $sql_column = $this->sql_format_timestamp($sql_column);
+                    $sql_column = $this->sql_format_timestamp($sql_column, $this->column_options[$column]['format'] ?? null);
                 }
 
                 $formatted_searchpart = $this->format_user_input($column, $search_part);
@@ -587,7 +593,7 @@ class table_sql extends moodle_table_sql {
             $sql_column = $this->get_sql_column($column);
 
             if (($this->column_options[$column]['data_type'] ?? '') == static::PARAM_TIMESTAMP) {
-                $sql_column_as_char = $this->sql_format_timestamp($sql_column);
+                $sql_column_as_char = $this->sql_format_timestamp($sql_column, $this->column_options[$column]['format'] ?? null);
             } else {
                 $sql_column_as_char = $DB->sql_cast_to_char($sql_column);
             }
@@ -607,21 +613,21 @@ class table_sql extends moodle_table_sql {
 
             if (empty($filter->fn) || $filter->fn == 'contains') {
                 if ($value) {
-                    if (is_array($value)) {
-                        // list of possible values
-                        list ($insql, $inparams) = $DB->get_in_or_equal($value, $param_type, 'like_filter_' . str_replace('.', '', microtime(true)));
-                        $filter_where[] = $sql_column_as_char . ' ' . $insql;
-                        $params = array_merge($params, $inparams);
-                    } else {
                         // text suche
                         $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
                         $params[$get_param_key()] = '%' . preg_replace('!\s+!', '%', $DB->sql_like_escape($value)) . '%';
-                    }
                 }
             } elseif ($filter->fn == 'equals') {
-                // case insensitive compare:
-                $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
-                $params[$get_param_key()] = $DB->sql_like_escape($value);
+                if (is_array($value)) {
+                    // list of possible values
+                    list ($insql, $inparams) = $DB->get_in_or_equal($value, $param_type, 'like_filter_' . str_replace('.', '', microtime(true)));
+                    $filter_where[] = $sql_column_as_char . ' ' . $insql;
+                    $params = array_merge($params, $inparams);
+                } else {
+                    // case insensitive compare:
+                    $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
+                    $params[$get_param_key()] = $DB->sql_like_escape($value);
+                }
             } elseif ($filter->fn == 'notEquals') {
                 // case insensitive compare
                 $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false, true);
@@ -942,11 +948,11 @@ class table_sql extends moodle_table_sql {
     public function other_cols($column, $row) {
         $value = $row->{$column} ?? '';
         if (($this->column_options[$column]['data_type'] ?? '') == static::PARAM_TIMESTAMP) {
-            return $this->format_timestamp($value);
+            return $this->format_timestamp($value, $this->column_options[$column]['format'] ?? null);
         }
 
         if (preg_match('!^time!', $column) && ctype_digit((string)$value)) {
-            return $this->format_timestamp($value);
+            return $this->format_timestamp($value, $this->column_options[$column]['format'] ?? null);
         }
 
         if (empty($this->column_options[$column]['internal']) && (!$this->is_downloading() || $this->export_class_instance()->supports_html())) {
@@ -957,8 +963,8 @@ class table_sql extends moodle_table_sql {
         }
     }
 
-    protected function format_timestamp($timestamp) {
-        return $timestamp ? userdate($timestamp, $this->datetime_format, 99, false) : '';
+    protected function format_timestamp($timestamp, ?string $format = null) {
+        return $timestamp ? userdate($timestamp, $format ?: $this->datetime_format, 99, false) : '';
     }
 
     protected function format_user_input($column, $value) {
@@ -1097,14 +1103,13 @@ class table_sql extends moodle_table_sql {
                 $filterSelectOptions = [];
                 foreach ($this->column_options[$column]['select_options'] as $key => $value) {
                     if (is_scalar($value)) {
-                        $filterSelectOptions[] = ['text' => $value, 'value' => $key];
+                        $filterSelectOptions[] = ['label' => $value, 'value' => $key];
                     } else {
                         $filterSelectOptions[] = $value;
                     }
                 }
 
                 $columnConfig->mrtOptions->filterSelectOptions = $filterSelectOptions;
-                $columnConfig->mrtOptions->columnFilterModeOptions = [];
             }
 
             if ($this->column_options[$column]['mrt_options'] ?? false) {
@@ -1250,6 +1255,8 @@ class table_sql extends moodle_table_sql {
     }
 
     private function handle_xhr(): void {
+        global $CFG;
+
         $json_output = function($data): void {
             header('Cache-Control: private, must-revalidate, pre-check=0, post-check=0, max-age=0');
             header('Pragma: no-cache');
@@ -1267,7 +1274,9 @@ class table_sql extends moodle_table_sql {
             $ret = $this->handle_xhr_action($table_sql_action);
             $json_output($ret);
         } catch (\Exception $e) {
-            if (has_capability('moodle/site:config', \context_system::instance())) {
+            if (has_capability('moodle/site:config', \context_system::instance())
+                || ($CFG->debug == DEBUG_DEVELOPER && $CFG->debugdisplay)
+            ) {
                 // more debug output for admin
                 $json_output([
                     'type' => 'error',

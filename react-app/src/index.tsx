@@ -2,11 +2,11 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
-import {AppContext} from 'lib/context';
-import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {fetchWithParams} from 'lib/helpers';
-import {AdapterDayjs} from '@mui/x-date-pickers/AdapterDayjs';
-import {LocalizationProvider} from '@mui/x-date-pickers/LocalizationProvider';
+import { AppContext } from 'lib/context';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { fetchWithParams } from 'lib/helpers';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 
 import 'dayjs/locale/de'; // needed for german locale
 import dayjs from 'dayjs';
@@ -20,7 +20,7 @@ dayjs.extend(timezone);
 const queryClient = new QueryClient();
 
 function table_sql_start(config) {
-  let {container} = config;
+  let { container } = config;
   let containerElement;
 
   if (typeof container == 'string') {
@@ -39,7 +39,7 @@ function table_sql_start(config) {
     if (config.url) {
       config.url = new URL(config.url, document.location.href);
     } else {
-      config.url = new URL(document.location.href);
+      config.url = null; // dynamic url (eg. url can be changed via javascript pushState, and then reload the table dynamically)
     }
   }
 
@@ -48,10 +48,10 @@ function table_sql_start(config) {
   const root = ReactDOM.createRoot(tableElement as HTMLElement);
   root.render(
     <React.StrictMode>
-      <AppContext.Provider value={{config}}>
+      <AppContext.Provider value={{ config }}>
         <QueryClientProvider client={queryClient}>
           <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale={config.current_language}>
-            <App/>
+            <App />
           </LocalizationProvider>
         </QueryClientProvider>
       </AppContext.Provider>

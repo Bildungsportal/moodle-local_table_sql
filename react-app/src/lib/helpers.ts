@@ -1,4 +1,6 @@
 export async function fetchWithParams(url: URL, params: object) {
+  // make a copy, pass url.href, for compatibility with older browsers
+  url = new URL(url.href);
   url.searchParams.set('is_xhr', '1');
 
   for (const key in params) {
@@ -93,7 +95,7 @@ function escapeRegExp(str) {
 }
 
 export function highlightNodes(root, highlight) {
-  const searchParts = highlight.toLowerCase().split(/\s+/);
+  const searchParts = highlight.trim().toLowerCase().split(/\s+/);
   const escapedStr = searchParts.map((part) => escapeRegExp(escapeHTML(part))).join('|');
   const regexp = new RegExp(`(${escapedStr})`, 'gi');
 
@@ -122,4 +124,8 @@ export function highlightNodes(root, highlight) {
       });
     }
   });
+}
+
+export function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

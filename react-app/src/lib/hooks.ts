@@ -30,5 +30,6 @@ export const useAppConfig = () => {
 export function useFetchWithParams() {
   const { uniqueid, url } = useAppConfig();
 
-  return (params) => fetchWithParams(url, { uniqueid, ...params });
+  // if the url is dynamic, then config.url is null
+  return (params) => fetchWithParams(url || new URL(document.location.href), { uniqueid, ...params });
 }
