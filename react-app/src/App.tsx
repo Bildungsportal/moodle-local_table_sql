@@ -14,6 +14,7 @@ import {
   MRT_VisibilityState,
   useMaterialReactTable,
   MRT_Row,
+  MRT_Icons,
 } from 'material-react-table';
 import { MenuItem, Box, IconButton, Button, Alert, Collapse, Paper, CircularProgress, Stack } from '@mui/material';
 import { Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
@@ -23,6 +24,13 @@ import { useAppConfig, useFetchWithParams } from 'lib/hooks';
 import { convertSnakeCaseToCamelCase, debounce, highlightNodes, replacePlaceholders, sleep, stringToFunction } from 'lib/helpers';
 import { useLocalization } from 'lib/localization';
 import dayjs from 'dayjs';
+import SearchIcon from '@mui/icons-material/Search';
+import SearchOffIcon from '@mui/icons-material/SearchOff';
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
+import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
+import FilterListIcon from '@mui/icons-material/FilterList';
+import FilterListOffIcon from '@mui/icons-material/FilterListOff';
+import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
@@ -434,6 +442,8 @@ const App = (props) => {
   );
   const [selectedRowsCount, setSelectedRowsCount] = useState(0);
 
+  // FIXES START: all fixes for material-react-table are here
+
   // reset the value of range-slider on table load
   // this is needed so the selected values get displayed correctly in the slide component in PROD
   // mrt table bug (only in PROD or without the React.StrictMode)
@@ -558,6 +568,8 @@ const App = (props) => {
       document.removeEventListener('keydown', handleKeyDown, true);
     };
   }, []);
+
+  // FIXES END
 
   const localization = useLocalization();
   const { getString } = localization;
@@ -804,7 +816,9 @@ const App = (props) => {
         url = replacePlaceholders(url, row.original);
       }
 
-      if (action.type == 'delete') {
+      if (action.type == 'delete' && !action.onclick) {
+        // fallback message if no onclick is set
+        // this is actually not used anywhere for now
         return {
           href: url,
           onClick: (e) => {
@@ -819,6 +833,7 @@ const App = (props) => {
 
       return {
         href: url || undefined,
+        target: action.target,
         onClick: (e) => {
           let ret = null;
           if (action.onclick) {
@@ -997,6 +1012,45 @@ const App = (props) => {
   useEffect(() => {
     fireEvent(eventData);
   }, [JSON.stringify(eventData)]);
+
+  // hack für accessibility: um mittels polling den aria-expanded zu ändern
+  const icons: Partial<MRT_Icons> = {
+    SearchIcon: (props: any) => <SearchIcon {...props} data-accessibility-hackid="SearchIcon" />,
+    SearchOffIcon: () => <SearchOffIcon data-accessibility-hackid="SearchOffIcon" />,
+    FullscreenIcon: () => <FullscreenIcon data-accessibility-hackid="FullscreenIcon" />,
+    FullscreenExitIcon: () => <FullscreenExitIcon data-accessibility-hackid="FullscreenExitIcon" />,
+    FilterListIcon: () => <FilterListIcon data-accessibility-hackid="FilterListIcon" />,
+    FilterListOffIcon: () => <FilterListOffIcon data-accessibility-hackid="FilterListOffIcon" />,
+    ViewColumnIcon: () => <ViewColumnIcon data-accessibility-hackid="ViewColumnIcon" />,
+  };
+  useEffect(() => {
+    // hack für accessibility: um mittels polling den aria-expanded zu ändern
+    const interval = setInterval(() => {
+      tableConfig.containerElement
+        ?.querySelectorAll('[data-accessibility-hackid="SearchIcon"], [data-accessibility-hackid="FullscreenIcon"], [data-accessibility-hackid="FilterListIcon"]')
+        .forEach((el) => {
+          // Only set aria-expanded if parentNode is a button and is not in the table (so it is probably a button in the header right)
+          if (el.parentNode && el.parentNode.nodeName === 'BUTTON' && !el.closest('.MuiTable-root')) {
+            el.parentNode.setAttribute('aria-expanded', 'false');
+          } else if (el.matches('[data-accessibility-hackid="FilterListIcon"]') && el.parentNode.nodeName === 'BUTTON' && el.closest('.MuiTable-root')) {
+            // it is the filter button for a specific table column
+            el.parentNode.setAttribute('aria-haspopup', 'true');
+          }
+        });
+      tableConfig.containerElement
+        ?.querySelectorAll('[data-accessibility-hackid="SearchOffIcon"], [data-accessibility-hackid="FullscreenExitIcon"], [data-accessibility-hackid="FilterListOffIcon"]')
+        .forEach((el) => {
+          // Only set aria-expanded if parentNode is a button
+          if (el.parentNode && el.parentNode.nodeName === 'BUTTON' && !el.closest('.MuiTable-root')) {
+            el.parentNode.setAttribute('aria-expanded', 'true');
+          }
+        });
+
+      tableConfig.containerElement?.querySelector('[data-accessibility-hackid="ViewColumnIcon"]')?.parentNode.setAttribute('aria-haspopup', 'true');
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [tableConfig.containerElement]);
 
   const table = useMaterialReactTable<TableRow>({
     // enableKeyboardShortcuts: false,
@@ -1252,6 +1306,8 @@ const App = (props) => {
 
     // turn on row virtualization for tables with a long list, this makes scrolling much smoother
     enableRowVirtualization: pagination.pageSize >= 500,
+
+    icons,
 
     ...tableConfig.mrtOptions,
   });

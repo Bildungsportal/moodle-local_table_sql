@@ -25,6 +25,8 @@ namespace local_table_sql;
 
 use core_user;
 use dml_exception;
+use local_table_sql\local\js_call_amd;
+use local_table_sql\local\js_expression;
 use moodle_exception;
 use moodle_url;
 use table_sql as moodle_table_sql;
@@ -33,6 +35,7 @@ use function fullname;
 defined('MOODLE_INTERNAL') || die();
 
 require_once($CFG->libdir . '/tablelib.php');
+require_once(__DIR__ . '/../vendor/autoload.php');
 
 class table_sql extends moodle_table_sql {
 
@@ -119,6 +122,13 @@ class table_sql extends moodle_table_sql {
             // $this->is_downloading(true);
         }
 
+        // base url needs to be set before defining the row actions, because the row actions need the base url to create the links
+        if (empty($this->baseurl)) {
+            // debugging('You should set baseurl when using flexible_table.');
+            global $PAGE;
+            $this->baseurl = $PAGE->url;
+        }
+
         // Define columns in the table.
         $this->define_table_columns();
 
@@ -148,12 +158,6 @@ class table_sql extends moodle_table_sql {
             $this->column_class('delete', 'delete');
             $this->no_filter('delete');
             $this->no_sorting('delete');
-        }
-
-        if (empty($this->baseurl)) {
-            // debugging('You should set baseurl when using flexible_table.');
-            global $PAGE;
-            $this->baseurl = $PAGE->url;
         }
 
         if (headers_sent() && $this->immediately_call_actions && !$this->xhr_url) {
@@ -194,7 +198,7 @@ class table_sql extends moodle_table_sql {
         $this->define_headers(array_values($cols));
     }
 
-    protected function set_column_options($column, ?string $sql_column = null, ?array $select_options = null, ?string $data_type = null, ?bool $visible = null, ?bool $internal = null, ?bool $no_filter = null, ?bool $no_sorting = null, ?string $onclick = null, array|object|null $mrt_options = null, ?string $format = null) {
+    protected function set_column_options($column, ?string $sql_column = null, ?array $select_options = null, ?string $data_type = null, ?bool $visible = null, ?bool $internal = null, ?bool $no_filter = null, ?bool $no_sorting = null, string|\Closure|js_call_amd|null $onclick = null, array|object|null $mrt_options = null, ?string $format = null) {
         if (!isset($this->columns[$column])) {
             throw new \moodle_exception("column $column not found");
         }
@@ -318,6 +322,15 @@ class table_sql extends moodle_table_sql {
 
     protected function set_sql_table(string $table) {
         $this->sql->table = $table;
+    }
+
+    protected function get_sql_table(): string {
+        $table = $this->sql->table ?? trim($this->sql->from, '{}');
+        if (!preg_match('!^[^\s]+$!', $table)) {
+            throw new \moodle_exception('table name not set, use table_sql->set_sql_table()');
+        }
+
+        return $table;
     }
 
     /**
@@ -613,9 +626,9 @@ class table_sql extends moodle_table_sql {
 
             if (empty($filter->fn) || $filter->fn == 'contains') {
                 if ($value) {
-                        // text suche
-                        $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
-                        $params[$get_param_key()] = '%' . preg_replace('!\s+!', '%', $DB->sql_like_escape($value)) . '%';
+                    // text suche
+                    $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
+                    $params[$get_param_key()] = '%' . preg_replace('!\s+!', '%', $DB->sql_like_escape($value)) . '%';
                 }
             } elseif ($filter->fn == 'equals') {
                 if (is_array($value)) {
@@ -705,7 +718,7 @@ class table_sql extends moodle_table_sql {
     }
 
 
-    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string $onclick = '', mixed $customdata = null) {
+    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string|\Closure|js_call_amd $onclick = '', mixed $customdata = null, string $target = '') {
         if (!$url) {
             if ($type == 'edit') {
                 $url = new \moodle_url($this->baseurl, ['action' => 'edit', 'id' => '{id}']);
@@ -722,17 +735,22 @@ class table_sql extends moodle_table_sql {
             }
         }
 
-        $this->row_actions[] = (object)[
+        $id = $id === '' ? 'action-' . (count($this->row_actions) + 1) : $id;
+        if (isset($this->row_actions[$id])) {
+            throw new \moodle_exception("row action with id '{$id}' already exists!");
+        }
+        $this->row_actions[$id] = (object)[
             'url' => $url,
             'type' => $type,
             'label' => $label,
             // dies erlaubt auch numerische ids, welche zu string convertiert werden
             // und erlaubt auch eine id '0'
-            'id' => $id === '' ? 'action-' . (count($this->row_actions) + 1) : $id,
+            'id' => $id,
             'disabled' => $disabled,
             'icon' => $icon,
-            'onclick' => trim($onclick),
+            'onclick' => is_string($onclick) ? trim($onclick) : $onclick,
             'customdata' => $customdata,
+            'target' => $target,
         ];
     }
 
@@ -787,7 +805,10 @@ class table_sql extends moodle_table_sql {
 
     protected function get_row_actions_v2(object $row): array {
         // clone everything, so the original objects don't get modified!
-        $row_actions = unserialize(serialize($this->row_actions));
+        // this won't work if row_actions contains a Closure for eg. onclick handler
+        // $row_actions = unserialize(serialize($this->row_actions));
+        // use deep_copy library instead
+        $row_actions = \DeepCopy\deep_copy($this->row_actions);
 
         return $row_actions;
     }
@@ -915,7 +936,7 @@ class table_sql extends moodle_table_sql {
         }
     }
 
-    protected function format_col_content(string $content, string|\moodle_url $link = null, string $target = '') {
+    protected function format_col_content(string $content, string|\moodle_url|null $link = null, string $target = '') {
         if ($link) {
             if ($this->is_xhr) {
                 return [
@@ -1036,7 +1057,7 @@ class table_sql extends moodle_table_sql {
                     'container' => '#' . $this->htmluniqueid(),
                 ], (array)$this->get_config()
                 // TODO later: add pagesize as parameter for the app?
-                ), is_siteadmin() ? JSON_PRETTY_PRINT : 0) . ")");
+                ), JSON_UNESCAPED_SLASHES | (is_siteadmin() ? JSON_PRETTY_PRINT : 0)) . ")");
         }
 
         echo '<div id="' . $this->htmluniqueid() . '">';
@@ -1083,6 +1104,14 @@ class table_sql extends moodle_table_sql {
         foreach ($this->columns as $column => $num) {
             $data_type = $this->get_column_data_type($column);
 
+            $onclick = $this->column_options[$column]['onclick'] ?? null;
+            if ($onclick instanceof js_call_amd) {
+                $onclick = $this->format_row_action_onclick($onclick, (object)[]);
+            } elseif ($onclick instanceof \Closure) {
+                throw new \moodle_exception('closure not allowed as onclick handler for column ' . $column . ' in table_sql, not yet implemented and tested!');
+                $onclick = null;
+            }
+
             $columns[] = $columnConfig = (object)[
                 'key' => $column,
                 'class' => trim($this->column_class[$column]),
@@ -1093,7 +1122,7 @@ class table_sql extends moodle_table_sql {
                 'filter' => !in_array($column, $this->column_nofilter) && !in_array($column, ['edit', 'delete']),
                 'internal' => $this->column_options[$column]['internal'] ?? false,
                 'visible' => $this->column_options[$column]['visible'] ?? true,
-                'onclick' => $this->column_options[$column]['onclick'] ?? null,
+                'onclick' => $onclick,
                 'mrtOptions' => (object)[],
             ];
 
@@ -1104,8 +1133,15 @@ class table_sql extends moodle_table_sql {
                 foreach ($this->column_options[$column]['select_options'] as $key => $value) {
                     if (is_scalar($value)) {
                         $filterSelectOptions[] = ['label' => $value, 'value' => $key];
-                    } else {
+                    } elseif (is_object($value) || is_array($value)) {
+                        debugging('select_options should be an array auf value => label pairs, but got an object or array.', DEBUG_DEVELOPER);
+
+                        // backwards compatibility, label was called text before in Material React Table
+                        $value = (array)$value;
+                        $value['label'] = $value['label'] ?? $value['text'] ?? '';
                         $filterSelectOptions[] = $value;
+                    } else {
+                        throw new \moodle_exception('wrong select_options value for column ' . $column . ': ' . print_r($value, true));
                     }
                 }
 
@@ -1123,7 +1159,7 @@ class table_sql extends moodle_table_sql {
                 $row_actions_display_as_menu = true;
             } else {
                 // wenn nicht definiert ist ob die action buttons als Buttons oder Dropdownmenü angezeigt werden
-                // dann die Länge aller Labels (exkl. edit und delte button, weil die als Button angezeigt werden) berechnen
+                // dann die Länge aller Labels (exkl. edit und delete button, weil die als Button angezeigt werden) berechnen
                 $row_action_labels = join('', array_map(function($action) {
                     if ($action->type == 'edit' || $action->type == 'delete' || $action->icon) {
                         return '';
@@ -1144,6 +1180,12 @@ class table_sql extends moodle_table_sql {
             // hide customdata in config output
             $action = clone $action;
             unset($action->customdata);
+
+            if ($action->onclick instanceof js_call_amd) {
+                $action->onclick = $this->format_row_action_onclick($action->onclick, (object)[]);
+            } elseif ($action->onclick instanceof \Closure) {
+                $action->onclick = null;
+            }
 
             return $action;
         }, $this->row_actions);
@@ -1179,7 +1221,7 @@ class table_sql extends moodle_table_sql {
             'sort_default_column' => $this->sort_default_column,
             'sort_default_order' => $this->sort_default_order == SORT_DESC ? 'desc' : 'asc',
             'columns' => $columns,
-            'row_actions' => $row_actions,
+            'row_actions' => array_values($row_actions), // remove the string keys
             'row_actions_display_as_menu' => $row_actions_display_as_menu,
             'enable_global_filter' => ($this->enable_global_filter ?? $this->is_sortable),
             'enable_column_filters' => $enable_column_filters,
@@ -1191,11 +1233,6 @@ class table_sql extends moodle_table_sql {
             'user_timezone' => date_default_timezone_get(), // this contains Europe/Berlin (moodle user timezone) and not Asia/Taipei
             'mrtOptions' => $this->mrt_options ?: (object)[],
         ];
-
-        die(json_encode([
-            'a' => [],
-            'b' => (object)[],
-        ]));
     }
 
     private function get_column_data_type($column) {
@@ -1263,8 +1300,14 @@ class table_sql extends moodle_table_sql {
             header('Expires: ' . gmdate('D, d M Y H:i:s', 0) . ' GMT');
             header("Content-Type: application/json\n");
 
-            echo json_encode($data, JSON_UNESCAPED_SLASHES
+            $ret = json_encode($data, JSON_UNESCAPED_SLASHES
                 | (optional_param('pretty', false, PARAM_BOOL) || (is_array($data) && !empty($data['type']) && $data['type'] == 'error') ? JSON_PRETTY_PRINT : 0));
+
+            if ($ret === false) {
+                throw new \moodle_exception("json_encode failed: " . json_last_error_msg());
+            }
+
+            echo $ret;
             exit;
         };
 
@@ -1429,14 +1472,23 @@ class table_sql extends moodle_table_sql {
 
                 // fix data_type
                 foreach ($row_actions as $row_action) {
-                    if (isset($row_action->disabled)) {
+                    if (property_exists($row_action, 'disabled')) {
                         // '0' is false in php, but true in javascript
                         $row_action->disabled = (bool)$row_action->disabled;
                     }
                 }
 
-                if (json_encode($row_actions) !== json_encode($this->row_actions)) {
+                $hasOnclickClosure = false;
+                foreach ($row_actions as $row_action) {
+                    if ($row_action->onclick instanceof \Closure) {
+                        $hasOnclickClosure = true;
+                        break;
+                    }
+                }
+
+                if (json_encode($row_actions) !== json_encode($this->row_actions) || $hasOnclickClosure) {
                     // remove all attributes, which are the same
+                    // onclick closures also need to be formatted for each row!
                     foreach ($row_actions as $row_action) {
                         if (empty($row_action->id)) {
                             continue;
@@ -1459,14 +1511,15 @@ class table_sql extends moodle_table_sql {
                             if (property_exists($base_row_action, $name) && (
                                     ($row_action->$name === $base_row_action->$name) ||
                                     // for url compare the moodle_url to string and compare
-                                    ($name == 'url' && (string)$row_action->$name === (string)$base_row_action->$name))
+                                    ($name == 'url' && (string)$row_action->$name === (string)$base_row_action->$name) ||
+                                    ($name == 'onclick' && $row_action->$name instanceof js_call_amd && $base_row_action->$name instanceof js_call_amd && $row_action->$name->equals($base_row_action->$name)))
                             ) {
                                 unset($row_action->$name); // Remove the attribute from the first object
                             }
                         }
                     }
 
-                    $row_actions = array_map(function($action) {
+                    $row_actions = array_map(function($action) use ($originalRow) {
                         if (!empty($action->url) && $action->url instanceof \moodle_url) {
                             $action->url = $action->url->out(false);
                             // replace encoded placeholders '{id}'
@@ -1474,13 +1527,18 @@ class table_sql extends moodle_table_sql {
                         }
 
                         if (!empty($action->onclick)) {
-                            $action->onclick = trim($action->onclick);
+                            if ($action->disabled ?? false) {
+                                // if the action is disabled, the onclick is not needed
+                                unset($action->onclick);
+                            } else {
+                                $action->onclick = $this->format_row_action_onclick($action->onclick, $originalRow);
+                            }
                         }
 
                         return $action;
                     }, $row_actions);
 
-                    $row['_data']->row_actions = $row_actions;
+                    $row['_data']->row_actions = array_values($row_actions); // remove the string keys
                 }
 
                 // remove _data if empty
@@ -1503,6 +1561,41 @@ class table_sql extends moodle_table_sql {
         }
 
         throw new \moodle_exception('unknown action: ' . $action);
+    }
+
+    private function format_row_action_onclick(string|\Closure|js_call_amd $onclick, object $row): ?string {
+        if (is_string($onclick)) {
+            return trim($onclick);
+        } else {
+            if ($onclick instanceof \Closure) {
+                $onclick = $onclick($row);
+
+                if ($onclick === null) {
+                    return '';
+                }
+
+                if (!($onclick instanceof js_call_amd)) {
+                    throw new \moodle_exception('onclick closure must return an instance of js_call_amd OR null');
+                }
+            } else {
+                // already instanceof js_call_amd
+            }
+
+            $params = [];
+            foreach ($onclick->params as $param) {
+                if ($param instanceof js_expression) {
+                    $params[] = $param->expression;
+                } else {
+                    $params[] = json_encode($param);
+                }
+            }
+
+            return "function(e, row){
+                require(" . json_encode([$onclick->fullmodule]) . ", function(module) {
+                    module[" . json_encode($onclick->func) . "](" . join(',', $params) . ");
+                });
+            }";
+        }
     }
 
     private function get_session_info() {
@@ -1529,6 +1622,22 @@ class table_sql extends moodle_table_sql {
         $session_info = $this->get_session_info();
 
         return $session_info->selected_rowids;
+    }
+
+    public function get_selected_rows(): array {
+        $this->setup();
+        $this->query_db(999999, false);
+
+        $selected_rowids = $this->get_selected_rowids();
+        $rows = [];
+
+        foreach ($this->rawdata as $row) {
+            if (in_array($row->id, $selected_rowids)) {
+                $rows[$row->id] = $row;
+            }
+        }
+
+        return $rows;
     }
 
     protected function render_detail_panel_content(object $row) {
@@ -1567,5 +1676,17 @@ class table_sql extends moodle_table_sql {
         $row = isset($this->rawdata) ? array_values($this->rawdata)[count($this->xhr_formatted_data)] : null;
 
         return $row;
+    }
+
+    /*
+     * usage:
+     * onclick: fn($row) => $this->js_call_amd('local_eduportal/amd_module_name', 'init', $params)
+     */
+    protected function js_call_amd(string $fullmodule, string $func, array $params = []): object {
+        return new js_call_amd($fullmodule, $func, $params);
+    }
+
+    protected function js_expression(string $expression): object {
+        return new js_expression($expression);
     }
 }

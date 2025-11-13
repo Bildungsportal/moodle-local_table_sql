@@ -38,3 +38,5 @@ $string['loading_error'] = 'Error while Loading...';
 
 $string['select_all_rows_on_all_pages'] = 'Select all rows on all pages';
 $string['select_none'] = 'Select none';
+
+$string['confirmdeleterecord'] = 'Delete this entry?';

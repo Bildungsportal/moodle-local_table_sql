@@ -38,3 +38,5 @@ $string['loading_error'] = 'Fehler beim Laden...';
 
 $string['select_all_rows_on_all_pages'] = 'Alle Zeilen auf allen Seiten auswählen';
 $string['select_none'] = 'Auswahl aufheben';
+
+$string['confirmdeleterecord'] = 'Eintrag löschen?';

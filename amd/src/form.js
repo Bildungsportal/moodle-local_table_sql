@@ -3,13 +3,15 @@ import $ from 'jquery';
 import ModalFactory from 'core/modal_factory';
 import ModalEvents from 'core/modal_events';
 import Notification from 'core/notification';
+import {get_strings} from 'core/str';
 
 var debug = false;
 
 
 async function xhrRequest(xhrdata) {
+  let ret;
   try {
-    return await $.post(document.location.href, xhrdata);
+    ret = await $.post(document.location.href, xhrdata);
   } catch (e) {
     var error = '';
 
@@ -25,6 +27,22 @@ async function xhrRequest(xhrdata) {
     Notification.exception(new Error(error));
 
     throw e;
+  }
+
+  if (ret.error) {
+    if (ret.exception) {
+      Notification.exception(ret.exception);
+
+      // TODO: like this?
+      throw ret.exception;
+    } else {
+      alert(ret.error);
+
+      // TODO: like this?
+      throw ret;
+    }
+  } else {
+    return ret;
   }
 }
 
@@ -193,4 +211,31 @@ async function send(modaldata, modal, $pane) {
   }
 
   modal.hide();
+}
+
+export async function deleteRow(event, row) {
+  const [
+    str_confirmdeleterecord
+  ] = await get_strings([
+    {
+      key: 'confirmdeleterecord',
+      component: 'local_table_sql'
+    }
+  ]);
+
+  if (!confirm(str_confirmdeleterecord)) {
+    return;
+  }
+
+  console.log(row);
+
+  const xhrdata = {
+    rowid: row.original.id,
+    is_xhr: 1,
+    table_sql_action: 'delete_row'
+  };
+
+  await xhrRequest(xhrdata);
+
+  window.table_sql_reload();
 }

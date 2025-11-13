@@ -23,6 +23,8 @@
 
 namespace local_table_sql;
 
+use local_table_sql\local\js_call_amd;
+
 defined('MOODLE_INTERNAL') || die;
 
 require_once("$CFG->libdir/tablelib.php");
@@ -35,6 +37,9 @@ abstract class table_sql_form extends table_sql {
      * @var table_sql_subform[]
      */
     protected array $forms = []; // Holds subforms of this table.
+
+    protected string $create_formid = '';
+    protected array $create_form_settings = [];
 
     public function __construct($uniqueid = null) {
         global $PAGE;
@@ -76,7 +81,7 @@ abstract class table_sql_form extends table_sql {
                 'errors' => '',
                 'form' => '',
                 'pageendcode' => '',
-                'modal_title' => $form->get_title() ?: get_string('edit'),
+                'modal_title' => $form->get_title() ?: ($rowid ? get_string('edit') : get_string('create')),
             ];
 
             if ($sentdata = $form->get_data()) {
@@ -162,6 +167,32 @@ abstract class table_sql_form extends table_sql {
             }
 
             return $result;
+        } elseif ($action == 'delete_row') {
+            // $rowid = required_param('rowid', PARAM_RAW);
+            $rowid = $_REQUEST['rowid'] ?? null; // can be scalar or array
+            $row = null;
+            $form = null;
+
+            if ($rowid) {
+                $target = $this;
+                if ($this->parameterIsType($target, 'get_row', 0, 'array') && !is_array($rowid)) {
+                    // for scalar
+                    $rowid = ['id' => $rowid];
+                }
+                $row = $target->get_row($rowid);
+            }
+
+            if (!$row) {
+                throw new \moodle_exception('row not found');
+            }
+
+            if ($form && method_exists($form, 'delete_row')) {
+                $form->delete_row($row);
+            } else {
+                $this->delete_row($row);
+            }
+
+            return ['success' => true];
         }
 
         return parent::handle_xhr_action($action);
@@ -181,7 +212,7 @@ abstract class table_sql_form extends table_sql {
     function as_modal_formfield(
         string $formid = '__default_form', string $column = '', int $rowid = 0, ?string $content = null, string $icon = 'fa fa-edit',
         array $fields = [],
-        string $btnclass = '', string $btnlabel = null, string $btnlabelclass = 'sr-only'
+        string $btnclass = '', ?string $btnlabel = null, string $btnlabelclass = 'sr-only'
     ): string {
         global $OUTPUT;
 
@@ -232,10 +263,10 @@ abstract class table_sql_form extends table_sql {
             $form = $formid;
             $formid = '__edit_form';
             $this->add_form($formid, $form);
+        } else {
+            // Check that this form exists.
+            $this->get_form($formid);
         }
-
-        // Check that this form exists.
-        $this->get_form($formid);
 
         $href = "#";
         $onclick = ''; // will be filled in get_row_actions_v2()
@@ -313,7 +344,7 @@ abstract class table_sql_form extends table_sql {
      * @return void
      * @throws \moodle_exception
      */
-    function add_form(string|table_sql_subform $formid, table_sql_subform $form = null, string $title = ''): void {
+    function add_form(string|table_sql_subform $formid, ?table_sql_subform $form = null, string $title = ''): void {
         if ($formid instanceof table_sql_subform) {
             $form = $formid;
             $formid = '__default_form';
@@ -346,10 +377,7 @@ abstract class table_sql_form extends table_sql {
     protected function store_row(object $data): void {
         global $DB;
 
-        $table = $this->sql->table ?? $this->sql->from;
-        if (!preg_match('!^[^\s]+$!', $table)) {
-            throw new \moodle_exception('table name not set, use table_sql->set_table_name()');
-        }
+        $table = $this->get_sql_table();
 
         if (!empty($data->id)) {
             $DB->update_record($table, $data);
@@ -393,5 +421,101 @@ abstract class table_sql_form extends table_sql {
         }
 
         return false;
+    }
+
+    protected function enable_create_form(table_sql_subform|string|null $formid = '',
+        string $icon = 'fa-solid fa-plus',
+        string $btnclass = 'btn btn-primary', ?string $btnlabel = null, string $btnlabelclass = '') {
+        if ($formid instanceof table_sql_subform) {
+            $form = $formid;
+            $formid = '__create_form';
+            $this->add_form($formid, $form);
+        } elseif (!$formid) {
+            // just use first form
+            if (!$this->forms) {
+                throw new \moodle_exception('no forms defined, use add_form() first');
+            }
+            $formid = key($this->forms);
+        } else {
+            // Check that this form exists.
+            $form = $this->get_form($formid);
+        }
+
+        $this->create_formid = $formid;
+        $this->create_form_settings = [
+            'icon' => $icon,
+            'btnclass' => $btnclass,
+            'btnlabel' => $btnlabel ?? get_string('create'),
+            'btnlabelclass' => $btnlabelclass,
+        ];
+    }
+
+    protected function enable_crud(table_sql_subform|string $formid = '') {
+        if ($formid instanceof table_sql_subform) {
+            $form = $formid;
+            $formid = 'edit';
+            $this->add_form($formid, $form);
+        } else {
+            $this->get_form($formid);
+        }
+
+        $this->enable_create_form();
+        $this->add_form_action($formid);
+        $this->add_row_action(type: 'delete');
+
+        // check if table is set
+        $this->get_sql_table();
+    }
+
+    function wrap_html_start() {
+        parent::wrap_html_start();
+
+        if ($this->create_formid) {
+            echo '<div style="padding-bottom: 5px;">';
+            echo $this->as_modal_formfield(
+                formid: $this->create_formid,
+                icon: $this->create_form_settings['icon'],
+                btnclass: $this->create_form_settings['btnclass'],
+                btnlabel: $this->create_form_settings['btnlabel'],
+                btnlabelclass: $this->create_form_settings['btnlabelclass'],
+            );
+            echo '</div>';
+        }
+    }
+
+    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string|\Closure|js_call_amd $onclick = '', mixed $customdata = null, string $target = '') {
+        if ($type == 'delete' && !$url && !$onclick && !$disabled) {
+            ob_start();
+            ?>
+            <script>
+                function (e, row) {
+                    e.preventDefault();
+                    require(['local_table_sql/form'], function (f) {
+                        f.deleteRow(e, row);
+                    });
+                }
+            </script>
+            <?php
+            $onclick = trim(preg_replace('!</?script>!', '', ob_get_clean()));
+            if (!$id) {
+                $id = 'xhr-delete';
+            }
+        }
+        parent::add_row_action($url, $type, $label, $id, $disabled, $icon, $onclick, $customdata, $target);
+    }
+
+    protected function delete_row(object $row) {
+        global $DB;
+
+        $delete_action = current(array_filter($this->get_row_actions_v2($row), function($action) {
+            return $action->type === 'delete';
+        }));
+        if (!$delete_action || $delete_action->disabled || $delete_action->id !== 'xhr-delete'
+            /* Hack: check if the default xhr-delete can be used, else don't allow deletion */) {
+            throw new \moodle_exception('delete not allowed');
+        }
+
+        $table = $this->get_sql_table();
+        $DB->delete_records($table, ['id' => $row->id]);
     }
 }
