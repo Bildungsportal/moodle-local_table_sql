@@ -1,6 +1,6 @@
 /* eslint-disable */
 import $ from 'jquery';
-import ModalFactory from 'core/modal_factory';
+import SaveCancelModal from 'core/modal_save_cancel';
 import ModalEvents from 'core/modal_events';
 import Notification from 'core/notification';
 import {get_strings} from 'core/str';
@@ -67,22 +67,19 @@ export async function loadModal(sender, modaldata = null) {
 
   var response = await xhrRequest(xhrdata);
 
-  ModalFactory.create({
+  const modal = await SaveCancelModal.create({
     // body gets set in updateModal()
+    title: response.modal_title,
     body: '', // response.form,
     large: true,
+    show: true,
     removeOnClose: true,
-    title: response.modal_title,
-    type: ModalFactory.types.SAVE_CANCEL,
-  }).then(function (modal) {
-    updateModal(modaldata, modal, response, $pane);
-    modal.show();
-    modal.getRoot().on(ModalEvents.save, (e) => {
-      e.preventDefault();
-      send(modaldata, modal, $pane);
-    });
+  });
 
-    // TODO: on cancel remove modal?!?
+  updateModal(modaldata, modal, response, $pane);
+  modal.getRoot().on(ModalEvents.save, (e) => {
+    e.preventDefault();
+    modalSave(modaldata, modal, $pane);
   });
 }
 
@@ -163,7 +160,7 @@ function updateModal(modaldata, modal, response, $pane) {
  *
  *
  */
-async function send(modaldata, modal, $pane) {
+async function modalSave(modaldata, modal, $pane) {
   let form = $(modal.getRoot()).find('form');
 
   const xhrdata = {

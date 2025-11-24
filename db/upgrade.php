@@ -53,6 +53,29 @@ function xmldb_local_table_sql_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2024013100, 'local', 'table_sql');
     }
 
+    if ($oldversion < 2025111701) {
+        // Define field content to be added to local_table_sql_demo.
+        $table = new xmldb_table('local_table_sql_demo');
+        $field = new xmldb_field('content', XMLDB_TYPE_TEXT, null, null, null, null, null, 'label2');
+
+        // Conditionally launch add field content.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Define field valuelist to be added to local_table_sql_demo.
+        $table = new xmldb_table('local_table_sql_demo');
+        $field = new xmldb_field('valuelist', XMLDB_TYPE_TEXT, null, null, null, null, null, 'content');
+
+        // Conditionally launch add field valuelist.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Table_sql savepoint reached.
+        upgrade_plugin_savepoint(true, 2025111701, 'local', 'table_sql');
+    }
+
     // always check timezone after upgrade (TODO: add this to install.php)
     // correct timezone conversion is needed, so the fulltext search on timestamp columns works in mysql
     if ($DB->get_dbfamily() == 'mysql') {
@@ -68,7 +91,7 @@ function xmldb_local_table_sql_upgrade($oldversion) {
             // instead print it
             ?>
             <div class="box py-3 errorbox alert alert-danger">
-                <p class="errormessage"><?=$error?></p>
+                <p class="errormessage"><?= $error ?></p>
             </div>
             <?php
         }

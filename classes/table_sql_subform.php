@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * @package    local_classregister
+ * @package    local_table_sql
  * @copyright  2024 Austrian Federal Ministry of Education
  * @author     GTN solutions
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -129,7 +129,68 @@ abstract class table_sql_subform extends moodleform {
         return $this->title;
     }
 
-    public function _getDefaultValues() {
+    /**
+     * this function is only for internal use to get the default values of the form
+     */
+    public function _get_default_values(): array {
         return $this->_form->_defaultValues;
+    }
+
+    public function set_default_values(array $values): void {
+        $this->_form->setDefaults($values);
+    }
+
+    /**
+     * for internal usage only
+     * @return \HTML_QuickForm_element[]
+     */
+    public function _get_form_elements(): array {
+        // finalize the form definition if not yet done
+        // so the all elements are available
+        if (!$this->_definition_finalized) {
+            $this->_definition_finalized = true;
+            $this->definition_after_data();
+        }
+
+        return $this->_form->_elements;
+    }
+
+    public function set_data($default_values) {
+        // fix editor fields: the value is an array with 'text' and 'format' keys
+        $elements = $this->_get_form_elements();
+        foreach ($elements as $element) {
+            if ($element->getType() == 'editor' && is_string($default_values->{$element->getName()} ?? null)) {
+                $default_values->{$element->getName()} = [
+                    'text' => $default_values->{$element->getName()},
+                    'format' => FORMAT_HTML,
+                ];
+            }
+        }
+
+        parent::set_data($default_values);
+    }
+
+
+    public function display() {
+        // finalize the form definition if not yet done
+        // so the all elements are available
+        if (!$this->_definition_finalized) {
+            $this->_definition_finalized = true;
+            $this->definition_after_data();
+        }
+
+        foreach ($this->_form->_elements as $element) {
+            /* @var \HTML_QuickForm_element $element */
+            if ($element->getType() === 'editor') {
+                // hack: ensure that editor fields have an unique id attribute
+                // this prevents autosaving conflicts when multiple subforms are opened one after another
+                // else the value of the first opened editor would be loaded into all subsequently opened editors
+                if ($element->getAttribute('id') === null) {
+                    $element->updateAttributes(['id' => $element->getName() . '_random_' . random_string(10)]);
+                }
+            }
+        }
+
+        return parent::display();
     }
 }

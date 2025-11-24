@@ -820,7 +820,7 @@ const App = (props) => {
         // fallback message if no onclick is set
         // this is actually not used anywhere for now
         return {
-          href: url,
+          href: '', // no link for delete links
           onClick: (e) => {
             e.preventDefault();
 
@@ -900,7 +900,7 @@ const App = (props) => {
             const props = getRowActionProps(row, action, null);
 
             return icon ? (
-              <IconButton key={i} disabled={action.disabled} {...props} className={action.class}>
+              <IconButton key={i} disabled={action.disabled} title={action.label} {...props} className={action.class}>
                 {icon}
               </IconButton>
             ) : action.disabled ? (
@@ -1052,6 +1052,10 @@ const App = (props) => {
     return () => clearInterval(interval);
   }, [tableConfig.containerElement]);
 
+  // enableRowVirtualization is static an can not be changed later
+  // const enableRowVirtualization = false;
+  // maybe if tableConfig.page_size_options contains an option "all" then use virtualization
+
   const table = useMaterialReactTable<TableRow>({
     // enableKeyboardShortcuts: false,
     columns: mrtColumns,
@@ -1077,7 +1081,8 @@ const App = (props) => {
     defaultColumn: {
       minSize: 10, //allow columns to get smaller than default
       maxSize: 9001, //allow columns to get larger than default
-      size: 10, //make columns wider by default
+      // disabling the size setting, because with enableRowVirtualization=true the columns get very small on load
+      // size: 10, //make columns wider by default
     },
     // https://codesandbox.io/p/sandbox/github/KevinVandy/material-react-table/tree/main/apps/material-react-table-docs/examples/customize-filter-modes/sandbox?file=%2Fsrc%2FJS.js%3A55%2C7-55%2C30
     enableColumnFilterModes: true,
@@ -1143,8 +1148,8 @@ const App = (props) => {
       },
     },
     muiTableProps: {
-      // alternative zu has-sticky-action-menu wäre columnPinning+enablePinning
-      className: showStickyColumns && enableRowActions && tableConfig.row_actions_display_as_menu ? 'has-sticky-action-menu' : '',
+      // alternative zu has-sticky-action-column wäre columnPinning+enablePinning
+      className: showStickyColumns && enableRowActions && (tableConfig.row_actions_display_as_menu || tableConfig.row_actions_display_as_sticky_column) ? 'has-sticky-action-column' : '',
     },
     // disable "5 von 26 Zeile(n) ausgewählt"
     positionToolbarAlertBanner: 'none',
@@ -1304,8 +1309,9 @@ const App = (props) => {
       views: ['year', 'month', 'day'],
     },
 
-    // turn on row virtualization for tables with a long list, this makes scrolling much smoother
-    enableRowVirtualization: pagination.pageSize >= 500,
+    // enableRowVirtualization,
+    // rowVirtualization needs a maxHeight for a scrollbar inside the table
+    // muiTableContainerProps: enableRowVirtualization ? {sx: {maxHeight: '1800px'}} : undefined,
 
     icons,
 

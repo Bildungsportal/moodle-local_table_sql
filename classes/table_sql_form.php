@@ -50,7 +50,7 @@ abstract class table_sql_form extends table_sql {
         $PAGE->requires->js_call_amd('local_table_sql/form');
     }
 
-    protected function handle_xhr_action($action) {
+    protected function handle_xhr_action(string $action): object {
         global $CFG, $OUTPUT, $PAGE;
 
         if ($action == 'form_show' || $action == 'form_save') {
@@ -64,15 +64,25 @@ abstract class table_sql_form extends table_sql {
                 // if ($this->isMethodOverridden($form, table_sql_subform::class, 'get_row')) {
                 if (method_exists($form, 'get_row')) {
                     $target = $form;
+
+                    // check if the id is allowed
+                    $this->get_row_from_table_select($rowid);
                 } else {
                     $target = $this;
                 }
                 if ($this->parameterIsType($target, 'get_row', 0, 'array') && !is_array($rowid)) {
-                    // for scalar
+                    // backwards compability for array rowid
                     $rowid = ['id' => $rowid];
                 }
+
                 $row = $target->get_row($rowid);
+
+                if (!$row) {
+                    throw new \moodle_exception('row not found');
+                }
             } else {
+                // TODO: should this also use get_row to get default values for new rows?
+                // currently this can be achieved by overriding set_data() in the form
                 $row = (object)[];
             }
 
@@ -83,6 +93,8 @@ abstract class table_sql_form extends table_sql {
                 'pageendcode' => '',
                 'modal_title' => $form->get_title() ?: ($rowid ? get_string('edit') : get_string('create')),
             ];
+
+            $form->set_data($row);
 
             if ($sentdata = $form->get_data()) {
                 if (is_array($rowid)) {
@@ -109,29 +121,31 @@ abstract class table_sql_form extends table_sql {
                 }
                 */
             } else {
-                $form->set_data($row);
-                $oldDefaultValues = $form->_getDefaultValues();
+                $oldDefaultValues = $form->_get_default_values();
 
                 // TODO: wie ginge das anders?
                 // alte version
                 /* It seems weird, as these lines do not produce any output.
-                 * However, they are absolutely required, so that get_head_code and  get_end_code provides all required
+                 * However, they are absolutely required, so that get_head_code and get_end_code provides all required
                  * javascripts so that the form fields work (e.g. file picker).
                  */
                 ob_start();
                 $OUTPUT->header();
+                $PAGE->requires->js_call_amd('local_table_sql/form_code_start');
+                $PAGE->requires->js_init_code("// <table_sql-head-code>\n");
                 $result->form = $form->render();
+                $PAGE->requires->js_init_code("// </table_sql-head-code>\n");
+                $PAGE->requires->js_call_amd('local_table_sql/form_code_end');
                 $OUTPUT->footer();
 
                 // Check if the default values have changed in defintion_after_data() (called inside render)
                 // It is not supported to use setDefault() inside definition_after_data, because it would override the values from set_data()
-                if ($oldDefaultValues !== $form->_getDefaultValues()) {
+                if ($oldDefaultValues !== $form->_get_default_values()) {
                     throw new \moodle_exception('default values in definition_after_data() changed using $form->setDefault()! This would override the values of set_data(). Set default values in definition() only!');
                 }
 
                 // this prevents in moodle 4.5 that an extra </body></html> is printed in the json after $OUTPUT->header()
                 $CFG->closingtags = '';
-
 
                 $headcode = $PAGE->requires->get_head_code($PAGE, $OUTPUT);
                 ob_get_clean();
@@ -140,35 +154,38 @@ abstract class table_sql_form extends table_sql {
                 $script = substr($headcode, $loadpos, $cfgpos - $loadpos);
                 $endcode = $PAGE->requires->get_end_code();
                 $script .= preg_replace('/<\/?(script|link)[^>]*>|\/\/<!\[CDATA\[|\/\/\]\]>/', '', $endcode);
+
                 // The default output overwrites require and destroys functionality of the current page. Therefore, we rename it.
                 $script = str_replace('var require =', 'var __disabled_require = ', $script);
 
+                // disable M.first code that tries to init something on page load
+                $removeBetween = function($text, $start, $end) {
+                    $pattern = sprintf('/(%s).*?(%s)/s', preg_quote($start, '/'), preg_quote($end, '/'));
+                    $new_text = preg_replace($pattern, '$1$2', $text);
+                    if ($new_text == $text) {
+                        die('not found: ' . $start . ' ... ' . $end);
+                    }
+                    return $new_text;
+                };
+                $script = $removeBetween($script, "require(['core/first'], function() {", "M.util.js_pending('local_table_sql/form_code_start');");
+                $script = $removeBetween($script, "M.util.js_pending('local_table_sql/form_code_end');", 'M.util.js_complete("core/first")');
+                $script = str_replace("require(['local_table_sql/form_code_start'],", 'var __disabled_form_code_start = (', $script);
+                $script = str_replace("require(['local_table_sql/form_code_end'],", 'var __disabled_form_code_end = (', $script);
 
-                // neue version: geht aber nicht, weil z.B. die strings nicht geladen werden
-                /*
-                ob_start();
-                echo $OUTPUT->header();
+                // the code below is disabled
+                // core/first is needed to init the html editor!
+                // OLD: disable M.first code that tries to init something on page load
+                // $script = str_replace("require(['core/first'],", 'var __disabled_core_first = (', $script);
+                // $script = str_replace('M.util.js_pending("core/first")', '', $script);
 
-                $PAGE->requires->js_init_code("// <table_sql-head-code>\n");
-                $result->form = $form->render();
-                $PAGE->requires->js_init_code("// </table_sql-head-code>\n");
-
-                echo $OUTPUT->footer();
-
-                $output = ob_get_clean();
-
-                // this prevents in moodle 4.5 that an extra </body></html> is printed in the json after $OUTPUT->header()
-                $CFG->closingtags = '';
-
-                $script = preg_replace('!.*<table_sql-head-code>|// </table_sql-head-code>.*!s', '', $output);
-                */
+                // rename M.str to prevent overwriting existing Translation values
+                $script = str_replace('M.str =', 'var __disabled_m_str = ', $script);
 
                 $result->pageendcode = $script;
             }
 
             return $result;
         } elseif ($action == 'delete_row') {
-            // $rowid = required_param('rowid', PARAM_RAW);
             $rowid = $_REQUEST['rowid'] ?? null; // can be scalar or array
             $row = null;
             $form = null;
@@ -182,7 +199,8 @@ abstract class table_sql_form extends table_sql {
                 $row = $target->get_row($rowid);
             }
 
-            if (!$row) {
+            if (!$row || empty($row->id)) {
+                // get_row still may return an object, for the default values
                 throw new \moodle_exception('row not found');
             }
 
@@ -192,7 +210,7 @@ abstract class table_sql_form extends table_sql {
                 $this->delete_row($row);
             }
 
-            return ['success' => true];
+            return (object)['success' => true];
         }
 
         return parent::handle_xhr_action($action);
@@ -232,7 +250,7 @@ abstract class table_sql_form extends table_sql {
         }
 
         // make sure form exists
-        $form = $this->get_form($formid);
+        $this->get_form($formid);
 
         $params = (object)[
             'btnclass' => $btnclass,
@@ -269,7 +287,7 @@ abstract class table_sql_form extends table_sql {
         }
 
         $href = "#";
-        $onclick = ''; // will be filled in get_row_actions_v2()
+        $onclick = ''; // will be filled in get_row_actions()
 
         $customdata = (object)[
             'is_form_action' => true,
@@ -280,8 +298,8 @@ abstract class table_sql_form extends table_sql {
         $this->add_row_action($href, $type, $label, $id, $disabled, $icon, $onclick, $customdata);
     }
 
-    protected function get_row_actions_v2(object $row): array {
-        $row_actions = parent::get_row_actions_v2($row);
+    protected function get_row_actions(object $row): array {
+        $row_actions = parent::get_row_actions($row);
 
         foreach ($row_actions as $row_action) {
             if ($row_action->customdata?->is_form_action) {
@@ -361,7 +379,7 @@ abstract class table_sql_form extends table_sql {
         }
     }
 
-    protected function get_row($id): ?object {
+    private function get_row_from_table_select(int $id): ?object {
         global $DB;
 
         $this->setup();
@@ -373,16 +391,46 @@ abstract class table_sql_form extends table_sql {
         return $row ?: null;
     }
 
+    protected function get_row($id): ?object {
+        global $DB;
+
+        $row = $this->get_row_from_table_select($id);
+
+        // also get all other fields from table:
+        if ($row) {
+            // also leave the fields from the table select, maybe they are needed to fill the form
+            // actually this is undocumented behaviour, but useful, but maybe remove it?!?
+            $row = (object)array_merge((array)$row, (array)$DB->get_record($this->get_sql_table(), ['id' => $id]));
+        }
+
+        return $row;
+    }
+
 
     protected function store_row(object $data): void {
         global $DB;
 
         $table = $this->get_sql_table();
 
+        // fix editor fields: the value is an array with 'text' and 'format' keys
+        $formid = required_param('formid', PARAM_TEXT);
+        $form = $this->get_form($formid);
+
+        $elements = $form->_get_form_elements();
+        foreach ($elements as $element) {
+            if ($element->getType() == 'editor' && is_array($data->{$element->getName()} ?? null)) {
+                $data->{$element->getName()} = $data->{$element->getName()}['text'];
+            }
+            if ($element->getType() == 'select' && is_array($data->{$element->getName()} ?? null)) {
+                $data->{$element->getName()} = join(',', $data->{$element->getName()});
+            }
+        }
+
         if (!empty($data->id)) {
             $DB->update_record($table, $data);
         } else {
-            $DB->insert_record($table, $data);
+            // save the id of the new record, so an overridden store_row() can use it.
+            $data->id = $DB->insert_record($table, $data);
         }
     }
 
@@ -483,7 +531,7 @@ abstract class table_sql_form extends table_sql {
         }
     }
 
-    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string|\Closure|js_call_amd $onclick = '', mixed $customdata = null, string $target = '') {
+    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string|\Closure|js_call_amd $onclick = '', mixed $customdata = null, string $target = ''): void {
         if ($type == 'delete' && !$url && !$onclick && !$disabled) {
             ob_start();
             ?>
@@ -500,14 +548,17 @@ abstract class table_sql_form extends table_sql {
             if (!$id) {
                 $id = 'xhr-delete';
             }
+            // prevent parent class from defining a url
+            $url = '#';
         }
+
         parent::add_row_action($url, $type, $label, $id, $disabled, $icon, $onclick, $customdata, $target);
     }
 
     protected function delete_row(object $row) {
         global $DB;
 
-        $delete_action = current(array_filter($this->get_row_actions_v2($row), function($action) {
+        $delete_action = current(array_filter($this->get_row_actions($row), function($action) {
             return $action->type === 'delete';
         }));
         if (!$delete_action || $delete_action->disabled || $delete_action->id !== 'xhr-delete'

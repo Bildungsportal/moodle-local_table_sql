@@ -54,6 +54,7 @@ class table_sql extends moodle_table_sql {
     private bool $enable_detail_panel = false;
     private string $render_detail_panel_js_callback = '';
     private ?bool $row_actions_display_as_menu = null;
+    private ?bool $row_actions_display_as_sticky_column = null;
     private array $column_nofilter = [];
     private array $column_options = [];
 
@@ -75,7 +76,7 @@ class table_sql extends moodle_table_sql {
     const PARAM_TIMESTAMP = 'timestamp';
     const PARAM_UNKNOWN = 'unknown';
 
-    private $datetime_format = '%d.%m.%Y %H:%M';
+    private string $datetime_format = '%d.%m.%Y %H:%M';
 
     // override moodle default pagesize
     var $pagesize = 50;
@@ -198,7 +199,7 @@ class table_sql extends moodle_table_sql {
         $this->define_headers(array_values($cols));
     }
 
-    protected function set_column_options($column, ?string $sql_column = null, ?array $select_options = null, ?string $data_type = null, ?bool $visible = null, ?bool $internal = null, ?bool $no_filter = null, ?bool $no_sorting = null, string|\Closure|js_call_amd|null $onclick = null, array|object|null $mrt_options = null, ?string $format = null) {
+    protected function set_column_options($column, ?string $sql_column = null, ?array $select_options = null, ?string $data_type = null, ?bool $visible = null, ?bool $internal = null, ?bool $no_filter = null, ?bool $no_sorting = null, string|\Closure|js_call_amd|null $onclick = null, array|object|null $mrt_options = null, ?string $format = null): void {
         if (!isset($this->columns[$column])) {
             throw new \moodle_exception("column $column not found");
         }
@@ -260,7 +261,7 @@ class table_sql extends moodle_table_sql {
         }
     }
 
-    protected function set_mrt_options(array|object $mrt_options) {
+    protected function set_mrt_options(array|object $mrt_options): void {
         $this->mrt_options = (array)$mrt_options;
     }
 
@@ -286,19 +287,19 @@ class table_sql extends moodle_table_sql {
         $this->xhr_url = $xhr_url;
     }
 
-    protected function set_table_columns($cols) {
+    protected function set_table_columns($cols): void {
         $this->define_columns(array_keys($cols));
         $this->define_headers(array_values($cols));
     }
 
-    protected function set_pagesize($pagesize) {
+    protected function set_pagesize($pagesize): void {
         $this->pagesize = $pagesize;
     }
 
     /**
      * should be protected, but parent is public
      */
-    function set_sql($fields, $from, $where = '', array $params = array()) {
+    public function set_sql($fields, $from, $where = '', array $params = array()) {
         $from = trim($from);
         if ($from[0] != '{') {
             if (preg_match('!\s!', $from)) {
@@ -315,12 +316,12 @@ class table_sql extends moodle_table_sql {
         parent::set_sql($fields, $from, $where, $params);
     }
 
-    protected function set_sql_query(string $query, array $params = []) {
+    protected function set_sql_query(string $query, array $params = []): void {
         parent::set_sql('*', "({$query}) AS results", '1=1', $params);
         $this->sql->table = '';
     }
 
-    protected function set_sql_table(string $table) {
+    protected function set_sql_table(string $table): void {
         $this->sql->table = $table;
     }
 
@@ -337,9 +338,11 @@ class table_sql extends moodle_table_sql {
      * join an array [1 => 'name1', 2 => 'name2'] (which will be aggregated into a single column) into the main sql
      * @param array $values
      * @param string $join
+     * @param int $param_type
      * @return array
+     * @throws dml_exception
      */
-    protected function sql_aggregated_column_from_array(array $values, string $join, $param_type = SQL_PARAMS_QM) {
+    protected function sql_aggregated_column_from_array(array $values, string $join, int $param_type = SQL_PARAMS_QM): array {
         global $DB;
 
         // allowed types
@@ -375,14 +378,16 @@ class table_sql extends moodle_table_sql {
 
     /**
      * join an sql statement (which will be aggregated into a single column) into the main sql
-     * @param array $values
-     * @param string $join
-     * @return array
+     * @param string $select
+     * @param string $from
+     * @param string $separator
+     * @param string $sort
+     * @return string
      */
-    protected function sql_aggregated_column_from_query(string $select, string $from, string $sort = '') {
+    protected function sql_aggregated_column_from_query(string $select, string $from, string $separator = ', ', string $sort = ''): string {
         global $DB;
 
-        $select = "(SELECT " . $DB->sql_group_concat($select, ', ', $sort ?: $select) . "
+        $select = "(SELECT " . $DB->sql_group_concat($select, $separator, $sort ?: $select) . "
             FROM " . $from . ")";
 
         return $select;
@@ -480,7 +485,7 @@ class table_sql extends moodle_table_sql {
         $this->column_nofilter[] = $column;
     }
 
-    protected function get_filter_where($param_type = SQL_PARAMS_QM) {
+    protected function get_filter_where(int $param_type = SQL_PARAMS_QM): array {
         global $DB;
 
         if (!$this->is_downloading() || !$this->get_selected_rowids()) {
@@ -496,7 +501,7 @@ class table_sql extends moodle_table_sql {
         }
     }
 
-    private function get_global_filter_where($param_type = SQL_PARAMS_QM) {
+    private function get_global_filter_where(int $param_type = SQL_PARAMS_QM): array {
         global $DB;
 
         $search = optional_param('s', '', PARAM_TEXT);
@@ -558,7 +563,7 @@ class table_sql extends moodle_table_sql {
         return ['(' . join(' AND ', $filter_where) . ')', $params];
     }
 
-    private function get_column_filter_where($param_type = SQL_PARAMS_QM) {
+    private function get_column_filter_where(int $param_type = SQL_PARAMS_QM): array {
         global $DB;
 
         if (!in_array($param_type, [SQL_PARAMS_NAMED, SQL_PARAMS_QM])) {
@@ -718,11 +723,12 @@ class table_sql extends moodle_table_sql {
     }
 
 
-    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string|\Closure|js_call_amd $onclick = '', mixed $customdata = null, string $target = '') {
+    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string|\Closure|js_call_amd $onclick = '', mixed $customdata = null, string $target = ''): void {
         if (!$url) {
             if ($type == 'edit') {
                 $url = new \moodle_url($this->baseurl, ['action' => 'edit', 'id' => '{id}']);
             } elseif ($type == 'delete') {
+                // TODO: also add the sesskey to the url
                 $url = new \moodle_url($this->baseurl, ['action' => 'delete', 'id' => '{id}']);
             }
         }
@@ -754,56 +760,56 @@ class table_sql extends moodle_table_sql {
         ];
     }
 
-    protected function set_row_actions_display_as_menu(bool $as_menu) {
+    protected function set_row_actions_display_as_menu(bool $as_menu): void {
         $this->row_actions_display_as_menu = $as_menu;
     }
 
-    protected function set_row_actions_js_callback(string $row_actions_js_callback) {
+    protected function set_row_actions_display_as_sticky_column(bool $as_sticky_column): void {
+        $this->row_actions_display_as_sticky_column = $as_sticky_column;
+    }
+
+    protected function set_row_actions_js_callback(string $row_actions_js_callback): void {
         $this->row_actions_js_callback = $row_actions_js_callback;
     }
 
-    protected function set_render_detail_panel_js_callback(string $render_detail_panel_js_callback) {
+    protected function set_render_detail_panel_js_callback(string $render_detail_panel_js_callback): void {
         $this->enable_detail_panel = true;
         $this->render_detail_panel_js_callback = $render_detail_panel_js_callback;
     }
 
-    protected function enable_detail_panel(bool $enabled = true) {
+    protected function enable_detail_panel(bool $enabled = true): void {
         $this->enable_detail_panel = $enabled;
     }
 
-    protected function enable_row_selection(bool $enabled = true) {
+    protected function enable_row_selection(bool $enabled = true): void {
         $this->enable_row_selection = $enabled;
     }
 
-    protected function enable_global_filter(bool $enabled = true) {
+    protected function enable_global_filter(bool $enabled = true): void {
         $this->enable_global_filter = $enabled;
     }
 
-    protected function enable_column_filters(bool $enabled = true) {
+    protected function enable_column_filters(bool $enabled = true): void {
         $this->enable_column_filters = $enabled;
     }
 
-    protected function enable_page_size_selector(bool $enabled = true) {
+    protected function enable_page_size_selector(bool $enabled = true): void {
         $this->enable_page_size_selector = $enabled;
     }
 
-    protected function set_page_size_options(array $page_size_options) {
+    protected function set_page_size_options(array $page_size_options): void {
         $this->page_size_options = $page_size_options;
     }
 
-    protected function set_initial_page_index(int $page) {
+    protected function set_initial_page_index(int $page): void {
         $this->initial_page_index = $page;
     }
 
-    protected function add_full_text_search_column(string $column) {
+    protected function add_full_text_search_column(string $column): void {
         $this->full_text_search_columns[] = $column;
     }
 
-    protected function get_row_actions(object $row, array $row_actions): ?array {
-        return null;
-    }
-
-    protected function get_row_actions_v2(object $row): array {
+    protected function get_row_actions(object $row): array {
         // clone everything, so the original objects don't get modified!
         // this won't work if row_actions contains a Closure for eg. onclick handler
         // $row_actions = unserialize(serialize($this->row_actions));
@@ -811,6 +817,13 @@ class table_sql extends moodle_table_sql {
         $row_actions = \DeepCopy\deep_copy($this->row_actions);
 
         return $row_actions;
+    }
+
+    /**
+     * TODO: Entfernen, wenn get_row_actions_v2() überall ersetzt wurde
+     */
+    protected function get_row_actions_v2(object $row): array {
+        return $this->get_row_actions($row);
     }
 
     /**
@@ -984,7 +997,7 @@ class table_sql extends moodle_table_sql {
         }
     }
 
-    protected function format_timestamp($timestamp, ?string $format = null) {
+    protected function format_timestamp($timestamp, ?string $format = null): string {
         return $timestamp ? userdate($timestamp, $format ?: $this->datetime_format, 99, false) : '';
     }
 
@@ -996,7 +1009,7 @@ class table_sql extends moodle_table_sql {
         return $value;
     }
 
-    public function out_actions() {
+    public function out_actions(): void {
         if ($this->is_downloading()) {
             if (!$this->is_downloadable()) {
                 // when is_downloadable was not set in the configuration
@@ -1025,7 +1038,7 @@ class table_sql extends moodle_table_sql {
         return parent::is_downloadable($downloadable);
     }
 
-    protected function htmluniqueid() {
+    protected function get_htmluniqueid(): string {
         return 'table-sql-' . preg_replace('![^a-z0-9\-]!i', '', $this->uniqueid);
     }
 
@@ -1033,6 +1046,12 @@ class table_sql extends moodle_table_sql {
      * Override parent behavior
      */
     public function out($pagesize = null, $useinitialsbar = null, $downloadhelpbutton = '') {
+        $get_row_actions_v2_overridden = (new \ReflectionMethod($this, 'get_row_actions_v2'))->getDeclaringClass()->getName() !== __CLASS__;
+        if ($get_row_actions_v2_overridden) {
+            debugging('The function get_row_actions_v2() is deprecated and was renamed to get_row_actions().',
+                DEBUG_DEVELOPER);
+        }
+
         if ($this->is_downloading()) {
             return $this->_out();
         }
@@ -1054,13 +1073,13 @@ class table_sql extends moodle_table_sql {
             $PAGE->requires->js('/local/table_sql/js/main.js');
             $PAGE->requires->js_init_code("table_sql_start(" . json_encode(array_merge([
                     '__info' => is_siteadmin() ? 'Pretty print is only for admin!' : '',
-                    'container' => '#' . $this->htmluniqueid(),
+                    'container' => '#' . $this->get_htmluniqueid(),
                 ], (array)$this->get_config()
                 // TODO later: add pagesize as parameter for the app?
                 ), JSON_UNESCAPED_SLASHES | (is_siteadmin() ? JSON_PRETTY_PRINT : 0)) . ")");
         }
 
-        echo '<div id="' . $this->htmluniqueid() . '">';
+        echo '<div id="' . $this->get_htmluniqueid() . '">';
         if (in_array(TABLE_P_TOP, $this->showdownloadbuttonsat)) {
             echo $this->download_buttons();
         }
@@ -1098,7 +1117,7 @@ class table_sql extends moodle_table_sql {
         }
     }
 
-    protected function get_config() {
+    protected function get_config(): object {
         $headers = $this->headers;
         $columns = [];
         foreach ($this->columns as $column => $num) {
@@ -1153,23 +1172,35 @@ class table_sql extends moodle_table_sql {
             }
         }
 
+        // wenn nicht definiert ist ob die action buttons als Buttons oder Dropdownmenü angezeigt werden
+        // dann die Länge aller Labels (exkl. edit und delete button, weil die als Button angezeigt werden) berechnen
+        $row_action_labels = join('', array_map(function($action) {
+            if ($action->type == 'edit' || $action->type == 'delete' || $action->icon) {
+                return '123'; // icon only button, which is about 3 characters wide
+            } else {
+                return $action->label;
+            }
+        }, $this->row_actions));
+
         $row_actions_display_as_menu = $this->row_actions_display_as_menu;
         if ($row_actions_display_as_menu === null) {
             if (count($this->row_actions) > 5) {
                 $row_actions_display_as_menu = true;
             } else {
-                // wenn nicht definiert ist ob die action buttons als Buttons oder Dropdownmenü angezeigt werden
-                // dann die Länge aller Labels (exkl. edit und delete button, weil die als Button angezeigt werden) berechnen
-                $row_action_labels = join('', array_map(function($action) {
-                    if ($action->type == 'edit' || $action->type == 'delete' || $action->icon) {
-                        return '';
-                    } else {
-                        return $action->label;
-                    }
-                }, $this->row_actions));
                 $row_actions_display_as_menu = strlen($row_action_labels) >= 22;
             }
         }
+        $row_actions_display_as_sticky_column = $this->row_actions_display_as_sticky_column;
+        if ($row_actions_display_as_sticky_column === null) {
+            if ($row_actions_display_as_menu) {
+                $row_actions_display_as_sticky_column = true;
+            } elseif (count($this->row_actions) > 5) {
+                $row_actions_display_as_sticky_column = false;
+            } else {
+                $row_actions_display_as_sticky_column = !(strlen($row_action_labels) >= 22);
+            }
+        }
+
         $row_actions = array_map(function($action) {
             if ($action->url instanceof \moodle_url) {
                 $action->url = $action->url->out(false);
@@ -1201,7 +1232,8 @@ class table_sql extends moodle_table_sql {
             $page_size_options = $this->page_size_options;
         } else {
             $page_size_options = [
-                10, 20, 50, 100, 1000, ['label' => 'Alle', 'value' => 10000],
+                10, 20, 50, 100, 1000,
+                // ['label' => 'Alle', 'value' => 10000],
             ];
             if (!in_array($this->pagesize, $page_size_options)) {
                 $page_size_options[] = $this->pagesize;
@@ -1210,7 +1242,7 @@ class table_sql extends moodle_table_sql {
         }
 
         return (object)[
-            'htmluniqueid' => $this->htmluniqueid(),
+            'htmluniqueid' => $this->get_htmluniqueid(),
             'uniqueid' => $this->uniqueid,
             'url' => $this->xhr_url,
             'current_language' => current_language(),
@@ -1223,6 +1255,7 @@ class table_sql extends moodle_table_sql {
             'columns' => $columns,
             'row_actions' => array_values($row_actions), // remove the string keys
             'row_actions_display_as_menu' => $row_actions_display_as_menu,
+            'row_actions_display_as_sticky_column' => $row_actions_display_as_sticky_column,
             'enable_global_filter' => ($this->enable_global_filter ?? $this->is_sortable),
             'enable_column_filters' => $enable_column_filters,
             'enable_page_size_selector' => $this->enable_page_size_selector,
@@ -1235,7 +1268,7 @@ class table_sql extends moodle_table_sql {
         ];
     }
 
-    private function get_column_data_type($column) {
+    private function get_column_data_type($column): string {
         global $DB;
 
         if (!empty($this->column_options[$column]['data_type'])) {
@@ -1337,10 +1370,10 @@ class table_sql extends moodle_table_sql {
         }
     }
 
-    protected function handle_xhr_action(string $action) {
+    protected function handle_xhr_action(string $action): object {
         // only needed in dev!
         if ($action == 'get_config') {
-            return [
+            return (object)[
                 'type' => 'success',
                 'data' => $this->get_config(),
             ];
@@ -1371,7 +1404,7 @@ class table_sql extends moodle_table_sql {
             $session_info->selected_rowids = $selected_rowids;
             $session_info->selection_last_changed = time();
 
-            return [
+            return (object)[
                 'meta' => [
                     'selected_rows_count' => count($selected_rowids),
                 ],
@@ -1400,7 +1433,7 @@ class table_sql extends moodle_table_sql {
             $session_info->selected_rowids = $selected_rowids;
             $session_info->selection_last_changed = time();
 
-            return [
+            return (object)[
                 'meta' => [
                     'selected_rows_count' => count($selected_rowids),
                 ],
@@ -1426,6 +1459,9 @@ class table_sql extends moodle_table_sql {
 
             // $this->rawdata is indexed by id
             $rawdata = array_values($this->rawdata);
+
+            $get_row_actions_overridden = (new \ReflectionMethod($this, 'get_row_actions'))->getDeclaringClass()->getName() !== __CLASS__;
+            $get_row_actions_v2_overridden = (new \ReflectionMethod($this, 'get_row_actions_v2'))->getDeclaringClass()->getName() !== __CLASS__;
 
             // fix rows
             foreach ($rows as $row_i => &$row) {
@@ -1466,79 +1502,87 @@ class table_sql extends moodle_table_sql {
                     $row['_data']->detail_panel_content = $this->render_detail_panel_content($originalRow);
                 }
 
-                $row_actions = $this->get_row_actions_v2($originalRow);
+                if ($get_row_actions_overridden || $get_row_actions_v2_overridden) {
+                    // only needed if get_row_actions (or the old get_row_actions_v2) was overridden
+                    // because get_row_actions can change the row actions per row
 
-                $row_actions = $this->get_row_actions($originalRow, $row_actions) ?: $row_actions;
-
-                // fix data_type
-                foreach ($row_actions as $row_action) {
-                    if (property_exists($row_action, 'disabled')) {
-                        // '0' is false in php, but true in javascript
-                        $row_action->disabled = (bool)$row_action->disabled;
+                    if ($get_row_actions_v2_overridden) {
+                        // old way
+                        $row_actions = $this->get_row_actions_v2($originalRow);
+                    } else {
+                        $row_actions = $this->get_row_actions($originalRow);
                     }
-                }
 
-                $hasOnclickClosure = false;
-                foreach ($row_actions as $row_action) {
-                    if ($row_action->onclick instanceof \Closure) {
-                        $hasOnclickClosure = true;
-                        break;
-                    }
-                }
-
-                if (json_encode($row_actions) !== json_encode($this->row_actions) || $hasOnclickClosure) {
-                    // remove all attributes, which are the same
-                    // onclick closures also need to be formatted for each row!
+                    // fix data_type
                     foreach ($row_actions as $row_action) {
-                        if (empty($row_action->id)) {
-                            continue;
+                        if (property_exists($row_action, 'disabled')) {
+                            // '0' is false in php, but true in javascript
+                            $row_action->disabled = (bool)$row_action->disabled;
                         }
+                    }
 
-                        $base_row_action = current(array_filter($this->row_actions, function($base_row_action) use ($row_action) {
-                            return $base_row_action->id == $row_action->id;
-                        }));
-
-                        if (!$base_row_action) {
-                            continue;
+                    $hasOnclickClosure = false;
+                    foreach ($row_actions as $row_action) {
+                        if ($row_action->onclick instanceof \Closure) {
+                            $hasOnclickClosure = true;
+                            break;
                         }
+                    }
 
-                        foreach (get_object_vars($row_action) as $name => $value) {
-                            if ($name == 'id') {
+                    if (json_encode($row_actions) !== json_encode($this->row_actions) || $hasOnclickClosure) {
+                        // remove all attributes, which are the same
+                        // onclick closures also need to be formatted for each row!
+                        foreach ($row_actions as $row_action) {
+                            if (empty($row_action->id)) {
                                 continue;
                             }
 
-                            // Check if the attribute exists in both objects and has the same value
-                            if (property_exists($base_row_action, $name) && (
-                                    ($row_action->$name === $base_row_action->$name) ||
-                                    // for url compare the moodle_url to string and compare
-                                    ($name == 'url' && (string)$row_action->$name === (string)$base_row_action->$name) ||
-                                    ($name == 'onclick' && $row_action->$name instanceof js_call_amd && $base_row_action->$name instanceof js_call_amd && $row_action->$name->equals($base_row_action->$name)))
-                            ) {
-                                unset($row_action->$name); // Remove the attribute from the first object
+                            $base_row_action = current(array_filter($this->row_actions, function($base_row_action) use ($row_action) {
+                                return $base_row_action->id == $row_action->id;
+                            }));
+
+                            if (!$base_row_action) {
+                                continue;
+                            }
+
+                            foreach (get_object_vars($row_action) as $name => $value) {
+                                if ($name == 'id') {
+                                    continue;
+                                }
+
+                                // Check if the attribute exists in both objects and has the same value
+                                if (property_exists($base_row_action, $name) && (
+                                        ($row_action->$name === $base_row_action->$name) ||
+                                        // for url compare the moodle_url to string and compare
+                                        ($name == 'url' && (string)$row_action->$name === (string)$base_row_action->$name) ||
+                                        ($name == 'onclick' && $row_action->$name instanceof js_call_amd && $base_row_action->$name instanceof js_call_amd && $row_action->$name->equals($base_row_action->$name)))
+                                ) {
+                                    unset($row_action->$name); // Remove the attribute from the first object
+                                }
                             }
                         }
+
+                        $row_actions = array_map(function($action) use ($originalRow) {
+                            if (!empty($action->url) && $action->url instanceof \moodle_url) {
+                                $action->url = $action->url->out(false);
+                                // replace encoded placeholders '{id}'
+                                $action->url = preg_replace('!%7B([a-z0-9_]+)%7D!i', '{$1}', $action->url);
+                            }
+
+                            if (!empty($action->onclick)) {
+                                if ($action->disabled ?? false) {
+                                    // if the action is disabled, the onclick is not needed
+                                    unset($action->onclick);
+                                } else {
+                                    $action->onclick = $this->format_row_action_onclick($action->onclick, $originalRow);
+                                }
+                            }
+
+                            return $action;
+                        }, $row_actions);
+
+                        $row['_data']->row_actions = array_values($row_actions); // remove the string keys
                     }
-
-                    $row_actions = array_map(function($action) use ($originalRow) {
-                        if (!empty($action->url) && $action->url instanceof \moodle_url) {
-                            $action->url = $action->url->out(false);
-                            // replace encoded placeholders '{id}'
-                            $action->url = preg_replace('!%7B([a-z0-9_]+)%7D!i', '{$1}', $action->url);
-                        }
-
-                        if (!empty($action->onclick)) {
-                            if ($action->disabled ?? false) {
-                                // if the action is disabled, the onclick is not needed
-                                unset($action->onclick);
-                            } else {
-                                $action->onclick = $this->format_row_action_onclick($action->onclick, $originalRow);
-                            }
-                        }
-
-                        return $action;
-                    }, $row_actions);
-
-                    $row['_data']->row_actions = array_values($row_actions); // remove the string keys
                 }
 
                 // remove _data if empty
@@ -1547,7 +1591,7 @@ class table_sql extends moodle_table_sql {
                 }
             }
 
-            return [
+            return (object)[
                 'type' => 'success',
                 'meta' => [
                     'total' => $this->totalrows,
@@ -1598,7 +1642,7 @@ class table_sql extends moodle_table_sql {
         }
     }
 
-    private function get_session_info() {
+    private function get_session_info(): object {
         if (empty($_SESSION['local_table_sql_info'])) {
             $_SESSION['local_table_sql_info'] = [];
         }
@@ -1612,13 +1656,13 @@ class table_sql extends moodle_table_sql {
         return $_SESSION['local_table_sql_info'][$this->uniqueid];
     }
 
-    public function clear_selection() {
+    public function clear_selection(): void {
         $session_info = $this->get_session_info();
         $session_info->selected_rowids = [];
         $session_info->selection_last_changed = time();
     }
 
-    public function get_selected_rowids() {
+    public function get_selected_rowids(): array {
         $session_info = $this->get_session_info();
 
         return $session_info->selected_rowids;
@@ -1640,12 +1684,12 @@ class table_sql extends moodle_table_sql {
         return $rows;
     }
 
-    protected function render_detail_panel_content(object $row) {
-        return null;
+    protected function render_detail_panel_content(object $row): string {
+        return '';
     }
 
     /**
-     * Override parent behavior
+     * Overriding parent behavior
      * This method should be protected
      */
     public function set_default_per_page(int $defaultperpage): void {
@@ -1654,7 +1698,7 @@ class table_sql extends moodle_table_sql {
     }
 
     /**
-     * Override parent behavior
+     * Overriding parent behavior
      * This method should be protected
      */
     public function download_buttons() {
