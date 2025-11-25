@@ -25,7 +25,7 @@ namespace local_table_sql;
 
 use local_table_sql\local\js_call_amd;
 
-defined('MOODLE_INTERNAL') || die;
+defined('MOODLE_INTERNAL') || die();
 
 require_once("$CFG->libdir/tablelib.php");
 

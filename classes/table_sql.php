@@ -86,11 +86,12 @@ class table_sql extends moodle_table_sql {
 
         if ($uniqueid === null) {
             // use the whole classname and namespace, then create an md5 to hide implementation details to the client
-            $uniqueid = str_replace('\\', '.', get_class($this));
+            $uniqueid = str_replace('\\', '.', $this->get_class_name());
+            $uniqueid = md5($uniqueid);
         } elseif (is_array($uniqueid)) {
             // create a uniqueid of the parameters and the current class
-            // don't use __CLASS__, because it will give you local_table_sql/sql_table
-            $uniqueid = join('-', array_merge([str_replace('\\', '.', get_class($this))], $uniqueid));
+            $uniqueid = join('-', array_merge([str_replace('\\', '.', $this->get_class_name())], $uniqueid));
+            $uniqueid = md5($uniqueid);
         } elseif (is_string($uniqueid)) {
             // ok
         } else {
@@ -173,6 +174,32 @@ class table_sql extends moodle_table_sql {
         if ($this->immediately_call_actions) {
             $this->out_actions();
         }
+    }
+
+    /**
+     * Returns a class name. For anonymous classes, it returns the file path and line number, which IS NOT stable against code changes above the class definition.
+     * But good enough for us
+     * PHP's get_class() on anonymous functions also returns file + line number, but also adds some random string
+     * And that is not exactly defined in the PHP manual
+     *
+     * @return string The class name
+     */
+    function get_class_name(): string {
+        $reflection = new \ReflectionClass($this);
+
+        // 1. Handle Named Classes
+        if (!$reflection->isAnonymous()) {
+            return $reflection->getName();
+        }
+
+        // 2. Handle Anonymous Classes (MD5 of Location)
+        $fileName = $reflection->getFileName();
+        $startLine = $reflection->getStartLine();
+
+        // Create the volatile location string
+        $locationString = $fileName . ':' . $startLine;
+
+        return $locationString;
     }
 
     /**
@@ -471,14 +498,6 @@ class table_sql extends moodle_table_sql {
                 DATE_FORMAT(CONVERT_TZ(FROM_UNIXTIME({$column}), '{$mysql_timezone}', '{$timezone}'), '{$format}'),
                 '')";
         }
-    }
-
-    private function _uniqueid(string $prefix = 'unique') {
-        static $uniqueid = 0;
-
-        $uniqueid++;
-
-        return $prefix . $uniqueid;
     }
 
     protected function no_filter($column) {

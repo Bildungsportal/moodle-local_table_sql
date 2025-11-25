@@ -23,7 +23,7 @@
  */
 
 
-defined('MOODLE_INTERNAL') || die;
+defined('MOODLE_INTERNAL') || die();
 
 function xmldb_local_table_sql_upgrade($oldversion) {
     global $DB;
