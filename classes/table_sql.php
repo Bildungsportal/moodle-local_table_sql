@@ -177,29 +177,12 @@ class table_sql extends moodle_table_sql {
     }
 
     /**
-     * Returns a class name. For anonymous classes, it returns the file path and line number, which IS NOT stable against code changes above the class definition.
-     * But good enough for us
-     * PHP's get_class() on anonymous functions also returns file + line number, but also adds some random string
-     * And that is not exactly defined in the PHP manual
+     * Returns the class name.
      *
      * @return string The class name
      */
     function get_class_name(): string {
-        $reflection = new \ReflectionClass($this);
-
-        // 1. Handle Named Classes
-        if (!$reflection->isAnonymous()) {
-            return $reflection->getName();
-        }
-
-        // 2. Handle Anonymous Classes (MD5 of Location)
-        $fileName = $reflection->getFileName();
-        $startLine = $reflection->getStartLine();
-
-        // Create the volatile location string
-        $locationString = $fileName . ':' . $startLine;
-
-        return $locationString;
+        return helper::get_class_name($this);
     }
 
     /**
@@ -1431,17 +1414,10 @@ class table_sql extends moodle_table_sql {
         }
 
         if ($action == 'select_all') {
-            $this->setup();
-
-            $this->currpage = 0;
-            $this->pagesize = 999999;
-
-            $this->query_db(999999, false);
-
             $session_info = $this->get_session_info();
 
             $selected_rowids = $session_info->selected_rowids;
-            foreach ($this->rawdata as $row) {
+            foreach ($this->get_all_rows() as $row) {
                 $selected_rowids[] = $row->id;
             }
 
@@ -1464,7 +1440,11 @@ class table_sql extends moodle_table_sql {
             $session_info->selected_rowids = [];
             $session_info->selection_last_changed = time();
 
-            return true;
+            return (object)[
+                'meta' => [
+                    'selected_rows_count' => 0,
+                ],
+            ];
         }
 
         if ($action == 'list') {
@@ -1688,17 +1668,29 @@ class table_sql extends moodle_table_sql {
     }
 
     public function get_selected_rows(): array {
-        $this->setup();
-        $this->query_db(999999, false);
-
         $selected_rowids = $this->get_selected_rowids();
         $rows = [];
 
-        foreach ($this->rawdata as $row) {
+        foreach ($this->get_all_rows() as $row) {
             if (in_array($row->id, $selected_rowids)) {
                 $rows[$row->id] = $row;
             }
         }
+
+        return $rows;
+    }
+
+    public function get_all_rows(): array {
+        global $DB;
+
+        $this->setup();
+
+        $this->currpage = 0;
+        $this->pagesize = 999999;
+
+        // just get the raw data
+        list($sql, $params) = $this->get_sql_and_params();
+        $rows = $DB->get_records_sql($sql, $params);
 
         return $rows;
     }
