@@ -27,10 +27,9 @@ use local_table_sql\local\js_call_amd;
 
 defined('MOODLE_INTERNAL') || die();
 
-require_once("$CFG->libdir/tablelib.php");
-
 /**
  * This is a subclass of table_sql that adds capabilities to act as form like a moodleform does.
+ * TODO: consider renaming to table_sql_editable for clarity
  */
 abstract class table_sql_form extends table_sql {
     /**
@@ -45,9 +44,6 @@ abstract class table_sql_form extends table_sql {
         global $PAGE;
 
         parent::__construct($uniqueid);
-
-        // preload form.js
-        $PAGE->requires->js_call_amd('local_table_sql/form');
     }
 
     protected function handle_xhr_action(string $action): object {
@@ -65,8 +61,11 @@ abstract class table_sql_form extends table_sql {
                 if (method_exists($form, 'get_row')) {
                     $target = $form;
 
-                    // check if the id is allowed
-                    $this->get_row_from_table_select($rowid);
+                    // Also check the table if the id is allowed
+                    $row = $this->get_row($rowid);
+                    if (!$row) {
+                        throw new \moodle_exception('row not found');
+                    }
                 } else {
                     $target = $this;
                 }
@@ -318,7 +317,7 @@ abstract class table_sql_form extends table_sql {
                     foreach ($orig_rowid as $field) {
                         if (!empty($row->{$field})) {
                             $rowid->{$field} = $row->{$field};
-                        } else if (!empty($this->{$field})) {
+                        } elseif (!empty($this->{$field})) {
                             $rowid->{$field} = $this->{$field};
                         }
                     }
@@ -379,28 +378,24 @@ abstract class table_sql_form extends table_sql {
         }
     }
 
-    private function get_row_from_table_select(int $id): ?object {
-        global $DB;
-
-        $this->setup();
-        list($sql, $params) = $this->get_sql_and_params();
-
-        $sql = "select * from ($sql) as form_rows WHERE id=?";
-        $row = $DB->get_record_sql($sql, array_merge($params, [$id]));
-
-        return $row ?: null;
-    }
-
     protected function get_row($id): ?object {
         global $DB;
 
-        $row = $this->get_row_from_table_select($id);
+        $row = parent::get_row($id);
 
         // also get all other fields from table:
         if ($row) {
-            // also leave the fields from the table select, maybe they are needed to fill the form
-            // actually this is undocumented behaviour, but useful, but maybe remove it?!?
-            $row = (object)array_merge((array)$row, (array)$DB->get_record($this->get_sql_table(), ['id' => $id]));
+            try {
+                $table = $this->get_sql_table();
+            } catch (\moodle_exception $e) {
+                $table = '';
+            }
+
+            if ($table) {
+                // also leave the fields from the table select, maybe they are needed to fill the form
+                // actually this is undocumented behaviour, but useful, but maybe remove it?!?
+                $row = (object)array_merge((array)$DB->get_record($this->get_sql_table(), ['id' => $id]), (array)$row);
+            }
         }
 
         return $row;
@@ -531,7 +526,7 @@ abstract class table_sql_form extends table_sql {
         }
     }
 
-    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string|\Closure|js_call_amd $onclick = '', mixed $customdata = null, string $target = ''): void {
+    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string|\Closure|js_call_amd $onclick = '', mixed $customdata = null, string $target = '', string $class = ''): void {
         if ($type == 'delete' && !$url && !$onclick && !$disabled) {
             ob_start();
             ?>
@@ -552,7 +547,7 @@ abstract class table_sql_form extends table_sql {
             $url = '#';
         }
 
-        parent::add_row_action($url, $type, $label, $id, $disabled, $icon, $onclick, $customdata, $target);
+        parent::add_row_action($url, $type, $label, $id, $disabled, $icon, $onclick, $customdata, $target, $class);
     }
 
     protected function delete_row(object $row) {
@@ -568,5 +563,15 @@ abstract class table_sql_form extends table_sql {
 
         $table = $this->get_sql_table();
         $DB->delete_records($table, ['id' => $row->id]);
+    }
+
+    public function out($pagesize = null, $useinitialsbar = null, $downloadhelpbutton = '') {
+        global $PAGE;
+
+        if ($PAGE->requires) {
+            $PAGE->requires->js_call_amd('local_table_sql/form');
+        }
+
+        parent::out($pagesize, $useinitialsbar, $downloadhelpbutton);
     }
 }

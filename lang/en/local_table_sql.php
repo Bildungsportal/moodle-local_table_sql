@@ -40,3 +40,6 @@ $string['select_all_rows_on_all_pages'] = 'Select all rows on all pages';
 $string['select_none'] = 'Select none';
 
 $string['confirmdeleterecord'] = 'Delete this entry?';
+
+$string['sensitive_data:reveal'] = 'Reveal';
+$string['sensitive_data:rate_limit_exceeded'] = 'Too many requests. Please wait a moment.';

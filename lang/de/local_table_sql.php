@@ -40,3 +40,6 @@ $string['select_all_rows_on_all_pages'] = 'Alle Zeilen auf allen Seiten auswähl
 $string['select_none'] = 'Auswahl aufheben';
 
 $string['confirmdeleterecord'] = 'Eintrag löschen?';
+
+$string['sensitive_data:reveal'] = 'Anzeigen';
+$string['sensitive_data:rate_limit_exceeded'] = 'Zu viele Anfragen. Bitte warten Sie einen Moment.';

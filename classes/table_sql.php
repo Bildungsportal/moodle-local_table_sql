@@ -68,6 +68,9 @@ class table_sql extends moodle_table_sql {
 
     private array $mrt_options = [];
 
+    /** @var int Max reveal_sensitive requests per minute */
+    const SENSITIVE_DATA_RATE_LIMIT = 10;
+
     var $showdownloadbuttonsat = [TABLE_P_BOTTOM];
     private string $download_name = '';
 
@@ -209,7 +212,21 @@ class table_sql extends moodle_table_sql {
         $this->define_headers(array_values($cols));
     }
 
-    protected function set_column_options($column, ?string $sql_column = null, ?array $select_options = null, ?string $data_type = null, ?bool $visible = null, ?bool $internal = null, ?bool $no_filter = null, ?bool $no_sorting = null, string|\Closure|js_call_amd|null $onclick = null, array|object|null $mrt_options = null, ?string $format = null): void {
+    protected function set_column_options(
+        $column,
+        ?string $sql_column = null,
+        ?array $select_options = null,
+        ?string $data_type = null,
+        ?bool $visible = null,
+        ?bool $internal = null,
+        ?bool $no_filter = null,
+        ?bool $no_sorting = null,
+        string|\Closure|js_call_amd|null $onclick = null,
+        array|object|null $mrt_options = null,
+        ?string $format = null,
+        ?bool $sensitive = null,
+        int|string|null $wrap = null,
+    ): void {
         if (!isset($this->columns[$column])) {
             throw new \moodle_exception("column $column not found");
         }
@@ -260,6 +277,18 @@ class table_sql extends moodle_table_sql {
         if ($mrt_options !== null) {
             $this->column_options[$column]['mrt_options'] = $mrt_options;
         }
+
+        if ($sensitive !== null) {
+            $this->column_options[$column]['sensitive'] = $sensitive;
+        }
+
+        if ($wrap) {
+            $this->column_style($column, 'white-space', 'normal');
+            if (is_numeric($wrap)) {
+                $wrap .= 'px';
+            }
+            $this->column_style($column, 'min-width', $wrap);
+        }
     }
 
     /**
@@ -295,6 +324,10 @@ class table_sql extends moodle_table_sql {
         }
 
         $this->xhr_url = $xhr_url;
+    }
+
+    protected function get_xhr_url(): string {
+        return $this->xhr_url;
     }
 
     protected function set_table_columns($cols): void {
@@ -725,7 +758,7 @@ class table_sql extends moodle_table_sql {
     }
 
 
-    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string|\Closure|js_call_amd $onclick = '', mixed $customdata = null, string $target = ''): void {
+    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string|\Closure|js_call_amd $onclick = '', mixed $customdata = null, string $target = '', string $class = ''): void {
         if (!$url) {
             if ($type == 'edit') {
                 $url = new \moodle_url($this->baseurl, ['action' => 'edit', 'id' => '{id}']);
@@ -759,6 +792,7 @@ class table_sql extends moodle_table_sql {
             'onclick' => is_string($onclick) ? trim($onclick) : $onclick,
             'customdata' => $customdata,
             'target' => $target,
+            'class' => $class,
         ];
     }
 
@@ -991,6 +1025,11 @@ class table_sql extends moodle_table_sql {
             return $this->format_timestamp($value, $this->column_options[$column]['format'] ?? null);
         }
 
+        // Handle sensitive columns - always mask (display and export)
+        if (!empty($this->column_options[$column]['sensitive'])) {
+            return $this->mask_sensitive_value((string)($row->{$column} ?? ''));
+        }
+
         if (empty($this->column_options[$column]['internal']) && (!$this->is_downloading() || $this->export_class_instance()->supports_html())) {
             // escape content if not downloading
             return s($value);
@@ -1009,6 +1048,65 @@ class table_sql extends moodle_table_sql {
         }
 
         return $value;
+    }
+
+    /**
+     * Check rate limit for reveal_sensitive requests
+     * @throws \moodle_exception if rate limit exceeded
+     */
+    protected function check_sensitive_data_rate_limit(): void {
+        if (static::SENSITIVE_DATA_RATE_LIMIT <= 0) {
+            return;
+        }
+
+        global $SESSION;
+
+        $key = 'local_table_sql_sensitive_data_requests';
+        $now = time();
+        $window = 60; // 1 minute
+
+        if (!isset($SESSION->{$key})) {
+            $SESSION->{$key} = [];
+        }
+
+        // Remove old requests outside the window
+        $SESSION->{$key} = array_filter($SESSION->{$key}, fn($t) => $t > $now - $window);
+
+        if (count($SESSION->{$key}) >= static::SENSITIVE_DATA_RATE_LIMIT) {
+            throw new \moodle_exception('sensitive_data:rate_limit_exceeded', 'local_table_sql');
+        }
+
+        $SESSION->{$key}[] = $now;
+    }
+
+    /**
+     * Mask a sensitive value for display.
+     * E-Mail: r***@***.com
+     * Other: first char + *** + last char
+     */
+    protected function mask_sensitive_value(string $value): string {
+        if (!$value) {
+            return '';
+        }
+
+        // E-Mail detection
+        if (preg_match('/^([^@]+)@(.+)\.([^.]+)$/', $value, $matches)) {
+            $local = $matches[1];
+            $domain = $matches[2];
+            $tld = $matches[3];
+
+            $masked_local = mb_substr($local, 0, 1) . '***';
+            $masked_domain = '***';
+
+            return $masked_local . '@' . $masked_domain . '.' . $tld;
+        }
+
+        // General masking: first + *** + last character
+        if (mb_strlen($value) <= 2) {
+            return '***';
+        }
+
+        return mb_substr($value, 0, 1) . '***' . mb_substr($value, -1);
     }
 
     public function out_actions(): void {
@@ -1144,6 +1242,7 @@ class table_sql extends moodle_table_sql {
                 'internal' => $this->column_options[$column]['internal'] ?? false,
                 'visible' => $this->column_options[$column]['visible'] ?? true,
                 'onclick' => $onclick,
+                'sensitive' => $this->column_options[$column]['sensitive'] ?? false,
                 'mrtOptions' => (object)[],
             ];
 
@@ -1603,6 +1702,30 @@ class table_sql extends moodle_table_sql {
             ];
         }
 
+        if ($action == 'reveal_sensitive') {
+            $rowid = required_param('rowid', PARAM_INT);
+            $column = required_param('column', PARAM_ALPHANUMEXT);
+
+            // Verify column is actually marked as sensitive
+            if (empty($this->column_options[$column]['sensitive'])) {
+                throw new \moodle_exception('column is not sensitive');
+            }
+
+            // Rate limiting: max requests per minute
+            $this->check_sensitive_data_rate_limit();
+
+            // Get the row data
+            $row = $this->get_row($rowid);
+            if (!$row) {
+                throw new \moodle_exception('row not found');
+            }
+
+            return (object)[
+                'type' => 'success',
+                'value' => $row->{$column} ?? '',
+            ];
+        }
+
         throw new \moodle_exception('unknown action: ' . $action);
     }
 
@@ -1693,6 +1816,25 @@ class table_sql extends moodle_table_sql {
         $rows = $DB->get_records_sql($sql, $params);
 
         return $rows;
+    }
+
+    /**
+     * Get a single row by ID from the table query
+     *
+     * @param mixed $id Row identifier (no type hint to allow string/int/array in child classes)
+     */
+    protected function get_row($id): ?object {
+        global $DB;
+
+        $this->setup();
+        list($sql, $params) = $this->get_sql_and_params();
+
+        $sql = "SELECT * FROM ($sql) AS row_select WHERE id = ?";
+        $params[] = $id;
+
+        $row = $DB->get_record_sql($sql, $params);
+
+        return $row ?: null;
     }
 
     protected function render_detail_panel_content(object $row): string {

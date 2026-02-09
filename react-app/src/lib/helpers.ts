@@ -25,7 +25,16 @@ export function stringToFunction(str) {
     return null;
   }
 
-  return eval(`(${str})`);
+  str = String(str).trim();
+
+  // If it's already a function expression or arrow function, eval it directly
+  if (/^function\s*\(/.test(str) || /^\(.*\)\s*=>/.test(str)) {
+    return eval(`(${str})`);
+  }
+
+  // Wrap in a function, matching HTML onclick behavior exactly
+  // "return confirm(...)" prevents action, "confirm(...)" alone does not
+  return eval(`(function(e, row) { ${str} })`);
 }
 
 export function replacePlaceholders(template, obj) {

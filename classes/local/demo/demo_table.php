@@ -31,7 +31,12 @@ require_once($CFG->libdir . "/formslib.php");
 
 class demo_table extends table_sql {
     protected function define_table_configs() {
-        $sql = "SELECT id, d.groupid, d.label1, d.label2 FROM {local_table_sql_demo} d";
+        $sql = "SELECT id, d.groupid, d.label1, d.label2,
+            CASE WHEN (id % 2) = 0
+                THEN CONCAT('user', id, '@example.com')
+                ELSE CONCAT('Secret-Text-', id)
+            END AS sensitive_data
+            FROM {local_table_sql_demo} d";
         $params = [];
 
         // local test with many rows:
@@ -49,6 +54,7 @@ class demo_table extends table_sql {
             'groupid' => 'groupid',
             'label1' => 'label1',
             'label2' => 'label2',
+            'sensitive_data' => 'Sensitive Data',
         ];
         $this->set_table_columns($cols);
         $this->sortable(true, 'id', SORT_ASC);
@@ -69,6 +75,7 @@ class demo_table extends table_sql {
                 'step' => 1,
             ],
         ]);
+        $this->set_column_options('sensitive_data', sensitive: true);
         // $this->column_class('widgetid', 'local_table_sql-ignore-click-row-action');
 
         // $this->column_style('timecreated', 'background', 'lightgreen');
@@ -87,6 +94,7 @@ class demo_table extends table_sql {
             '/',
             label: 'Test Link',
             target: '_blank',
+            class: 'btn btn-sm btn-primary',
         );
         $this->add_row_action(
             id: 'test-onclick-nolink',

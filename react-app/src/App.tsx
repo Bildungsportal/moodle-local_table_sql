@@ -2,6 +2,7 @@
 // https://www.material-react-table.dev/?path=/story/features-search-examples--search-enabled-default
 
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   MaterialReactTable,
   MRT_RowSelectionState,
@@ -16,7 +17,8 @@ import {
   MRT_Row,
   MRT_Icons,
 } from 'material-react-table';
-import { MenuItem, Box, IconButton, Button, Alert, Collapse, Paper, CircularProgress, Stack } from '@mui/material';
+import { MenuItem, Box, IconButton, Button, Alert, Collapse, Paper, CircularProgress, Stack, Tooltip, Snackbar } from '@mui/material';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import './App.scss';
@@ -146,6 +148,12 @@ function useColumnDef({ getColumn, tableConfig }) {
                 // original content is empty => no content
                 return null;
               }
+
+              // Handle sensitive columns
+              if (configColumn.sensitive) {
+                return <SensitiveCell maskedValue={row.original[column.id]} rowId={row.original.id} columnId={column.id} />;
+              }
+
               if (typeof row.original[column.id] == 'string') {
                 const tableState = table.getState();
                 const columnSearch = column.getFilterValue() || tableState.globalFilter;
@@ -310,6 +318,72 @@ interface TableRow {
   [key: string]: any;
 }
 
+const SensitiveCell = ({ maskedValue, rowId, columnId }) => {
+  const fetchWithParams = useFetchWithParams();
+  const { getString } = useLocalization();
+  const [revealedValue, setRevealedValue] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleReveal = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (loading || revealedValue !== null) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await fetchWithParams({
+        table_sql_action: 'reveal_sensitive',
+        rowid: rowId,
+        column: columnId,
+      });
+
+      if (result?.type === 'success') {
+        setRevealedValue(result.value);
+      } else {
+        setError(result?.error || 'Unknown error');
+      }
+    } catch (error: any) {
+      setError(error?.message || 'Error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (revealedValue !== null) {
+    return <span>{revealedValue}</span>;
+  }
+
+  return (
+    <>
+      {/* Portal needed, without it the Snackbar is not visible on the Moodle live site */}
+      {createPortal(
+        <Snackbar
+          open={!!error}
+          autoHideDuration={4000}
+          onClose={() => setError(null)}
+          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        >
+          <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>
+        </Snackbar>,
+        document.body
+      )}
+      <Tooltip title={getString('sensitive_data:reveal')} disableInteractive slotProps={{ popper: { modifiers: [{ name: 'offset', options: { offset: [0, -14] } }] } }}>
+        <span className="sensitive-cell" onClick={handleReveal} style={{ cursor: 'pointer', display: 'block', margin: -8, padding: 8 }}>
+          <span className="sensitive-value">{maskedValue}</span>
+          {loading ? (
+            <CircularProgress size={14} style={{ marginLeft: 4 }} />
+          ) : (
+            <VisibilityIcon style={{ fontSize: 16, marginLeft: 4, verticalAlign: 'middle', opacity: 0.6 }} />
+          )}
+        </span>
+      </Tooltip>
+    </>
+  );
+};
+
 const DetailPanel = ({ row }: { row: MRT_Row<TableRow> }) => {
   const tableConfig = useAppConfig();
 
@@ -341,6 +415,9 @@ const App = (props) => {
   const fetchWithParams = useFetchWithParams();
 
   const tableConfig = useAppConfig();
+
+  const localization = useLocalization();
+  const { getString } = localization;
 
   function getColumn(key) {
     return tableConfig?.columns?.filter((column) => column.key == key)[0];
@@ -570,9 +647,6 @@ const App = (props) => {
   }, []);
 
   // FIXES END
-
-  const localization = useLocalization();
-  const { getString } = localization;
 
   const fetchListParams = {
     page: pagination.pageIndex,
@@ -880,7 +954,7 @@ const App = (props) => {
               key={i}
               disabled={action.disabled}
               component="a"
-              className="menu-item"
+              className={'menu-item ' + (action.class || '')}
               // style={{ color: 'inherit', textDecoration: 'none' }}
               // disableGutters={true}
             >
@@ -904,11 +978,11 @@ const App = (props) => {
                 {icon}
               </IconButton>
             ) : action.disabled ? (
-              <button key={i} disabled={action.disabled} className={action.class ?? 'btn btn-secondary btn-sm'} {...props}>
+              <button key={i} disabled={action.disabled} className={action.class || 'btn btn-secondary btn-sm'} {...props}>
                 {action.label || 'no-label'}
               </button>
             ) : (
-              <a key={i} className={action.class ?? 'btn btn-secondary btn-sm'} {...props}>
+              <a key={i} className={action.class || 'btn btn-secondary btn-sm'} {...props}>
                 {action.label || 'no-label'}
               </a>
             );
@@ -942,6 +1016,10 @@ const App = (props) => {
       }
       if (columnDefintion?.class) {
         className += ' ' + getColumn(column.id)?.class;
+      }
+      // Sensitive columns: clicking on cell reveals value, should not select row
+      if (columnDefintion?.sensitive) {
+        className += ' local_table_sql-ignore-click-row-action';
       }
 
       if (type == 'head' && maxLinesInHeader > 1) {
@@ -1081,8 +1159,14 @@ const App = (props) => {
     defaultColumn: {
       minSize: 10, //allow columns to get smaller than default
       maxSize: 9001, //allow columns to get larger than default
-      // disabling the size setting, because with enableRowVirtualization=true the columns get very small on load
-      // size: 10, //make columns wider by default
+      // with enableRowVirtualization=true use the default size of 180!
+      // or define the size of each column
+      size: 30, //make columns smaller by default, default size from MRT is 180px, let content determine width
+    },
+    displayColumnDefOptions: {
+      'mrt-row-actions': { size: 20 },
+      'mrt-row-select': { size: 10 },
+      'mrt-row-expand': { size: 10 },
     },
     // https://codesandbox.io/p/sandbox/github/KevinVandy/material-react-table/tree/main/apps/material-react-table-docs/examples/customize-filter-modes/sandbox?file=%2Fsrc%2FJS.js%3A55%2C7-55%2C30
     enableColumnFilterModes: true,
@@ -1216,7 +1300,7 @@ const App = (props) => {
     enableRowSelection: tableConfig.enable_row_selection,
     enableMultiRowSelection: tableConfig.enable_row_selection,
     enableSelectAll: tableConfig.enable_row_selection,
-    localization: localization.reactTable,
+    localization: localization.mrtLocalization,
     onRowSelectionChange: async (mutator) => {
       // actually first parameter should be the new values, but is a mutator function?!?
       const oldValues = rowSelection;

@@ -31,7 +31,8 @@ global $CFG;
 require_once($CFG->libdir . "/formslib.php");
 
 /**
- * Base class for subforms of table_sql.\
+ * Base class for subforms of table_sql.
+ * TODO: consider renaming to table_sql_row_form for clarity
  * @method void store_row(object $data) Implement this method to store the data of the subform.
  * @method object get_row(int $id) Implement this method to get the data of the subform.
  */

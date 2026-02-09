@@ -55,6 +55,7 @@ class demo_table_form extends table_sql_form {
 
         // $this->set_column_options('files', no_sorting: true, no_filter: true);
         $this->set_column_options('files_advanced', no_sorting: true, no_filter: true);
+        $this->set_column_options('content', wrap: 350);
 
         // enable the crud functionality by providing a table_sql_subform
         $this->enable_crud(new class extends table_sql_subform {

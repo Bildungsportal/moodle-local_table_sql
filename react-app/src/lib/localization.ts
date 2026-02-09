@@ -13,32 +13,23 @@ export function useLocalization() {
 
       return str;
     } else {
+      // Production: use Moodle's string function
       // @ts-ignore
       return M.util.get_string(id, 'local_table_sql', values);
     }
-    // let str = config.language_strings?.[id];
-    // if (str) {
-    //   if (values !== undefined) {
-    //     str = str.replace('{$a}', values);
-    //   }
-    // } else {
-    //   str = id;
-    //   if (values !== undefined) {
-    //     str += ' ' + JSON.stringify(values);
-    //   }
-    // }
-    // return str;
   }
 
   if (config.current_language.match(/^de/)) {
     return {
       getString,
-      reactTable: MRT_Localization_DE,
+      // Localization object for Material React Table component
+      mrtLocalization: MRT_Localization_DE,
     };
   } else {
     return {
       getString,
-      reactTable: undefined,
+      // Localization object for Material React Table component
+      mrtLocalization: undefined,
     };
   }
 }
