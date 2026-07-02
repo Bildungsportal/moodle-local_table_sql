@@ -3,7 +3,6 @@ import $ from 'jquery';
 import SaveCancelModal from 'core/modal_save_cancel';
 import ModalEvents from 'core/modal_events';
 import Notification from 'core/notification';
-import {get_strings} from 'core/str';
 
 var debug = false;
 
@@ -211,21 +210,8 @@ async function modalSave(modaldata, modal, $pane) {
 }
 
 export async function deleteRow(event, row) {
-  const [
-    str_confirmdeleterecord
-  ] = await get_strings([
-    {
-      key: 'confirmdeleterecord',
-      component: 'local_table_sql'
-    }
-  ]);
-
-  if (!confirm(str_confirmdeleterecord)) {
-    return;
-  }
-
-  console.log(row);
-
+  // Bestätigung läuft jetzt generisch in App.tsx vor dem onClick (action.confirm_message).
+  // Für delete-Actions wird der Default in table_sql_form::add_row_action gesetzt.
   const xhrdata = {
     rowid: row.original.id,
     is_xhr: 1,

@@ -23,7 +23,7 @@ import { Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import './App.scss';
 import { useAppConfig, useFetchWithParams } from 'lib/hooks';
-import { convertSnakeCaseToCamelCase, debounce, highlightNodes, replacePlaceholders, sleep, stringToFunction } from 'lib/helpers';
+import { convertSnakeCaseToCamelCase, debounce, highlightNodes, OUTPUT_EVENT, replacePlaceholders, sleep, stringToFunction } from 'lib/helpers';
 import { useLocalization } from 'lib/localization';
 import dayjs from 'dayjs';
 import SearchIcon from '@mui/icons-material/Search';
@@ -519,6 +519,20 @@ const App = (props) => {
   );
   const [selectedRowsCount, setSelectedRowsCount] = useState(0);
 
+  // Server-seitiger Output vor der JSON-Antwort (siehe tolerantJsonParse in lib/helpers).
+  // Wird per CustomEvent von fetchWithParams gemeldet und als Banner oben angezeigt.
+  const [unexpectedOutput, setUnexpectedOutput] = useState<string | null>(null);
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.output) {
+        setUnexpectedOutput(detail.output);
+      }
+    };
+    document.addEventListener(OUTPUT_EVENT, handler);
+    return () => document.removeEventListener(OUTPUT_EVENT, handler);
+  }, []);
+
   // FIXES START: all fixes for material-react-table are here
 
   // reset the value of range-slider on table load
@@ -779,10 +793,22 @@ const App = (props) => {
       downloadUrl.searchParams.set(key, value as any);
     }
 
+    // only export columns currently visible (column toggle)
+    const hiddenColumns = Object.keys(columnVisibility).filter((key) => columnVisibility[key] === false);
+    downloadUrl.searchParams.set('hiddencolumns', hiddenColumns.join(','));
+
     // Get the updated URL as a string
     const newURL = downloadUrl.toString();
 
-    tableConfig.containerElement.querySelectorAll('.table-sql-download-form-container form').forEach(function (form) {
+    tableConfig.containerElement.querySelectorAll('.table-sql-download-form-container').forEach(function (container) {
+      container.style.display = data ? '' : 'none';
+
+      var form = container.querySelector('form');
+      if (!form) {
+        // should not happen
+        return;
+      }
+
       // Formular auf post umstellen (ist normal get) und die parameter in die action mit der neuen url inkl. Filter überschreiben
       form.method = 'post';
       form.action = newURL;
@@ -803,7 +829,7 @@ const App = (props) => {
         submitButton.disabled = data?.meta?.total == 0;
       }
     });
-  }, [JSON.stringify(fetchListParams), selectedRowsCount, data]);
+  }, [JSON.stringify(fetchListParams), JSON.stringify(columnVisibility), selectedRowsCount, data]);
 
   // Check data loaded
   useEffect(() => {
@@ -905,10 +931,30 @@ const App = (props) => {
         };
       }
 
+      // confirm_message: vor dem eigentlichen onClick einen window.confirm zeigen.
+      // Platzhalter {spaltenname} werden aus row.original ersetzt.
+      // Gibt false zurück (und ruft preventDefault), wenn der User abbricht.
+      const confirmAction = (e) => {
+        if (!action.confirm_message) {
+          return true;
+        }
+        const msg = action.confirm_message.replace(/\{(\w+)\}/g, (_, key) => row.original[key] ?? '');
+        if (!window.confirm(msg)) {
+          e.preventDefault();
+          closeMenu?.();
+          return false;
+        }
+        return true;
+      };
+
       return {
         href: url || undefined,
         target: action.target,
         onClick: (e) => {
+          if (!confirmAction(e)) {
+            return;
+          }
+
           let ret = null;
           if (action.onclick) {
             ret = stringToFunction(action.onclick)(e, row);
@@ -921,6 +967,13 @@ const App = (props) => {
           }
 
           closeMenu?.();
+        },
+        onAuxClick: (e) => {
+          // Mittlere Maustaste (Link in neuem Tab öffnen) löst kein onClick aus,
+          // sondern auxclick. Default-Aktion (neuer Tab) erst nach Bestätigung zulassen.
+          if (e.button === 1) {
+            confirmAction(e);
+          }
         },
       };
     };
@@ -1281,6 +1334,18 @@ const App = (props) => {
 
       return (
         <>
+          <Collapse in={!!unexpectedOutput} timeout={200}>
+            {!!unexpectedOutput && (
+              <Alert
+                severity="warning"
+                onClose={() => setUnexpectedOutput(null)}
+                sx={{ '& .MuiAlert-message': { width: '100%' } }}
+              >
+                <strong>Unexpected output before JSON response</strong>
+                <div style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', marginTop: 4 }}>{unexpectedOutput}</div>
+              </Alert>
+            )}
+          </Collapse>
           <Collapse in={!!infoText || !!errorText} timeout={200}>
             {!!errorText && (
               <Alert severity="error" icon={false}>

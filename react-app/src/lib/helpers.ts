@@ -13,7 +13,36 @@ export async function fetchWithParams(url: URL, params: object) {
   const response = await fetch(url.href, {
     credentials: 'include',
   });
-  return response.json();
+  const text = await response.text();
+  return tolerantJsonParse(text);
+}
+
+// Manche Server geben vor unserer JSON-Antwort noch Bytes aus (BOM in config.php, Whitespace
+// aus auto_prepend_file, PHP-Notices, CMS-Wrapper). In dem Fall schlägt der
+// header('Content-Type: application/json')-Call server-seitig still fehl. PHP setzt dann
+// einen Marker direkt vor das JSON; hier schneiden wir alles davor weg, loggen es zur Konsole
+// und dispatchen ein CustomEvent, auf das die React-App reagiert (Banner über der Tabelle).
+const OUTPUT_MARKER = '--TABLE_SQL_OUTPUT_MARKER--';
+
+export const OUTPUT_EVENT = 'local_table_sql:output';
+
+export function tolerantJsonParse(text: string): any {
+  try {
+    return JSON.parse(text);
+  } catch (firstError) {
+    const markerIdx = text.indexOf(OUTPUT_MARKER);
+    if (markerIdx < 0) {
+      throw firstError;
+    }
+
+    const output = text.slice(0, markerIdx);
+    const jsonText = text.slice(markerIdx + OUTPUT_MARKER.length);
+
+    console.warn('local_table_sql: Unexpected output before JSON response:\n', output);
+    document.dispatchEvent(new CustomEvent(OUTPUT_EVENT, { detail: { output } }));
+
+    return JSON.parse(jsonText);
+  }
 }
 
 export function stringToFunction(str) {

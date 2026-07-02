@@ -526,7 +526,19 @@ abstract class table_sql_form extends table_sql {
         }
     }
 
-    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string|\Closure|js_call_amd $onclick = '', mixed $customdata = null, string $target = '', string $class = ''): void {
+    protected function add_row_action(
+        string|\moodle_url $url = '',
+        string $type = 'other',
+        string $label = '',
+        string $id = '',
+        bool $disabled = false,
+        string $icon = '',
+        string|\Closure|js_call_amd $onclick = '',
+        mixed $customdata = null,
+        string $target = '',
+        string $class = '',
+        string $confirm_message = ''
+    ): void {
         if ($type == 'delete' && !$url && !$onclick && !$disabled) {
             ob_start();
             ?>
@@ -545,9 +557,15 @@ abstract class table_sql_form extends table_sql {
             }
             // prevent parent class from defining a url
             $url = '#';
+
+            // Default-Confirm für Delete-Actions: confirmdeleterecord-Sprachstring; der Caller
+            // kann mit confirm_message überschreiben (z.B. um den Datensatznamen einzubauen).
+            if (!$confirm_message) {
+                $confirm_message = get_string('confirmdeleterecord', 'local_table_sql');
+            }
         }
 
-        parent::add_row_action($url, $type, $label, $id, $disabled, $icon, $onclick, $customdata, $target, $class);
+        parent::add_row_action($url, $type, $label, $id, $disabled, $icon, $onclick, $customdata, $target, $class, $confirm_message);
     }
 
     protected function delete_row(object $row) {

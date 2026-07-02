@@ -71,6 +71,9 @@ class table_sql extends moodle_table_sql {
     /** @var int Max reveal_sensitive requests per minute */
     const SENSITIVE_DATA_RATE_LIMIT = 10;
 
+    /** @var int Max rows that can be selected at once */
+    const SELECTION_MAX = 10000;
+
     var $showdownloadbuttonsat = [TABLE_P_BOTTOM];
     private string $download_name = '';
 
@@ -93,6 +96,7 @@ class table_sql extends moodle_table_sql {
             $uniqueid = md5($uniqueid);
         } elseif (is_array($uniqueid)) {
             // create a uniqueid of the parameters and the current class
+            $uniqueid = array_map(fn($v) => !is_scalar($v) ? json_encode($v) : $v, $uniqueid);
             $uniqueid = join('-', array_merge([str_replace('\\', '.', $this->get_class_name())], $uniqueid));
             $uniqueid = md5($uniqueid);
         } elseif (is_string($uniqueid)) {
@@ -165,8 +169,17 @@ class table_sql extends moodle_table_sql {
             $this->no_sorting('delete');
         }
 
-        if (headers_sent() && $this->immediately_call_actions && !$this->xhr_url) {
-            throw new moodle_exception('headers already sent and output already started! create a new table_sql before calling $OUTPUT->header()!');
+        if (headers_sent() && $this->immediately_call_actions && !$this->xhr_url && !$this->is_xhr) {
+            // Für XHR-Requests werfen wir hier nicht: handle_xhr() setzt einen Marker vor das
+            // JSON, sodass der Client den vorab ausgegebenen Output trennen und im Banner anzeigen kann.
+            $msg = 'headers already sent and output already started! create a new table_sql before calling $OUTPUT->header()!';
+            if (debugging('', DEBUG_DEVELOPER)) {
+                // In dev mode show an error box and continue, so the table still renders for debugging.
+                global $OUTPUT;
+                echo $OUTPUT->notification($msg, 'error');
+            } else {
+                throw new moodle_exception($msg);
+            }
         }
 
         if (!headers_sent() && $PAGE->requires) {
@@ -516,6 +529,59 @@ class table_sql extends moodle_table_sql {
         }
     }
 
+    /**
+     * Same as $DB->sql_like(), but with a working $accentsensitive=false on postgres.
+     * Mysql supports it natively, postgres ignores the parameter and needs the unaccent extension (same approach as local_aise).
+     */
+    protected function sql_like(string $fieldname, string $param, bool $casesensitive = true, bool $accentsensitive = true, bool $notlike = false, string $escapechar = "\\"): string {
+        global $DB;
+
+        // local_aise supports accent insensitive search on postgres via the unaccent extension
+        if (class_exists(\local_aise\lib::class)) {
+            return \local_aise\lib::sql_like($fieldname, $param, $casesensitive, $accentsensitive, $notlike, $escapechar);
+        }
+
+        return $DB->sql_like($fieldname, $param, $casesensitive, $accentsensitive, $notlike, $escapechar);
+
+        /* own unaccent logic, currently disabled in favor of local_aise
+        if ($accentsensitive || !$this->pgsql_unaccent_available()) {
+            return $DB->sql_like($fieldname, $param, $casesensitive, $accentsensitive, $notlike, $escapechar);
+        }
+
+        $not = $notlike ? 'NOT ' : '';
+        $like = $casesensitive ? 'LIKE' : 'ILIKE';
+        return "unaccent({$fieldname}) {$not}{$like} unaccent({$param}) ESCAPE '{$escapechar}'";
+        */
+    }
+
+    /* own unaccent logic, currently disabled in favor of local_aise
+    /**
+     * Check if the pgsql unaccent-extension is installed.
+     * The extension is not installed automatically, a database-administrator has to execute: CREATE EXTENSION IF NOT EXISTS unaccent
+     * After installing the extension the moodle cache needs to be purged.
+     * /
+    private function pgsql_unaccent_available(): bool {
+        global $DB;
+
+        if (!($DB instanceof \pgsql_native_moodle_database)) {
+            return false;
+        }
+
+        static $available = null;
+        if ($available === null) {
+            $cache = \cache::make_from_params(\cache_store::MODE_APPLICATION, 'local_table_sql', 'application');
+            $available = $cache->get('unaccent_exists');
+            if ($available === false) {
+                $available = $DB->record_exists_sql("SELECT 1 FROM pg_extension WHERE extname = 'unaccent'");
+                // store as 0/1, because $cache->get() also returns false on a cache miss
+                $cache->set('unaccent_exists', $available ? 1 : 0);
+            }
+        }
+
+        return (bool)$available;
+    }
+    */
+
     protected function no_filter($column) {
         $this->column_nofilter[] = $column;
     }
@@ -574,7 +640,7 @@ class table_sql extends moodle_table_sql {
                     continue;
                 }
 
-                $sql_column = $this->get_sql_column($column);
+                $sql_column = $this->get_sql_column($column, true);
                 // timestamp columns need to formated as a string, so it can be searched (eg. 08.02.2024)
                 if (($this->column_options[$column]['data_type'] ?? '') == static::PARAM_TIMESTAMP) {
                     $sql_column = $this->sql_format_timestamp($sql_column, $this->column_options[$column]['format'] ?? null);
@@ -583,12 +649,12 @@ class table_sql extends moodle_table_sql {
                 $formatted_searchpart = $this->format_user_input($column, $search_part);
 
                 // column needs to be casted to string for comparison in postgres!
-                $filter_where_for_search_part[] = $DB->sql_like($DB->sql_cast_to_char($sql_column), $get_param_name(), false, false);
+                $filter_where_for_search_part[] = $this->sql_like($DB->sql_cast_to_char($sql_column), $get_param_name(), false, false);
                 $params[$get_param_key()] = '%' . $DB->sql_like_escape($formatted_searchpart) . '%';
             }
 
             foreach ($this->full_text_search_columns as $sql_column) {
-                $filter_where_for_search_part[] = $DB->sql_like($DB->sql_cast_to_char($sql_column), $get_param_name(), false, false);
+                $filter_where_for_search_part[] = $this->sql_like($DB->sql_cast_to_char($sql_column), $get_param_name(), false, false);
                 $params[$get_param_key()] = '%' . $DB->sql_like_escape($search_part) . '%';
             }
 
@@ -643,7 +709,7 @@ class table_sql extends moodle_table_sql {
                 continue;
             }
 
-            $sql_column = $this->get_sql_column($column);
+            $sql_column = $this->get_sql_column($column, false);
 
             if (($this->column_options[$column]['data_type'] ?? '') == static::PARAM_TIMESTAMP) {
                 $sql_column_as_char = $this->sql_format_timestamp($sql_column, $this->column_options[$column]['format'] ?? null);
@@ -667,7 +733,7 @@ class table_sql extends moodle_table_sql {
             if (empty($filter->fn) || $filter->fn == 'contains') {
                 if ($value) {
                     // text suche
-                    $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
+                    $filter_where[] = $this->sql_like($sql_column_as_char, $get_param_name(), false, false);
                     $params[$get_param_key()] = '%' . preg_replace('!\s+!', '%', $DB->sql_like_escape($value)) . '%';
                 }
             } elseif ($filter->fn == 'equals') {
@@ -678,19 +744,19 @@ class table_sql extends moodle_table_sql {
                     $params = array_merge($params, $inparams);
                 } else {
                     // case insensitive compare:
-                    $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
+                    $filter_where[] = $this->sql_like($sql_column_as_char, $get_param_name(), false, false);
                     $params[$get_param_key()] = $DB->sql_like_escape($value);
                 }
             } elseif ($filter->fn == 'notEquals') {
                 // case insensitive compare
-                $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false, true);
+                $filter_where[] = $this->sql_like($sql_column_as_char, $get_param_name(), false, false, true);
                 $params[$get_param_key()] = $DB->sql_like_escape($value);
             } elseif ($filter->fn == 'startsWith') {
                 // case insensitive compare
-                $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
+                $filter_where[] = $this->sql_like($sql_column_as_char, $get_param_name(), false, false);
                 $params[$get_param_key()] = $DB->sql_like_escape($value) . '%';
             } elseif ($filter->fn == 'endsWith') {
-                $filter_where[] = $DB->sql_like($sql_column_as_char, $get_param_name(), false, false);
+                $filter_where[] = $this->sql_like($sql_column_as_char, $get_param_name(), false, false);
                 $params[$get_param_key()] = '%' . $DB->sql_like_escape($value);
             } elseif ($filter->fn == 'greaterThan' && strlen($value) > 0) {
                 $filter_where[] = $sql_column_as_number . " > " . $get_param_name();
@@ -730,7 +796,7 @@ class table_sql extends moodle_table_sql {
         return ['(' . join(' AND ', $filter_where) . ')', $params];
     }
 
-    private function get_sql_column($column) {
+    private function get_sql_column($column, $textual_representation = false) {
         if (!empty($this->column_options[$column]['sql_column'])) {
             return $this->column_options[$column]['sql_column'];
         }
@@ -754,11 +820,28 @@ class table_sql extends moodle_table_sql {
             }
         }
 
+        if ($textual_representation && ($this->column_options[$column]['select_options'] ?? null)) {
+            $labels = $this->get_select_option_labels($column);
+            $sql_column = $this->sql_case($sql_column, $labels);
+        }
+
         return $sql_column;
     }
 
 
-    protected function add_row_action(string|\moodle_url $url = '', string $type = 'other', string $label = '', string $id = '', bool $disabled = false, string $icon = '', string|\Closure|js_call_amd $onclick = '', mixed $customdata = null, string $target = '', string $class = ''): void {
+    protected function add_row_action(
+        string|\moodle_url $url = '',
+        string $type = 'other',
+        string $label = '',
+        string $id = '',
+        bool $disabled = false,
+        string $icon = '',
+        string|\Closure|js_call_amd $onclick = '',
+        mixed $customdata = null,
+        string $target = '',
+        string $class = '',
+        string $confirm_message = ''
+    ): void {
         if (!$url) {
             if ($type == 'edit') {
                 $url = new \moodle_url($this->baseurl, ['action' => 'edit', 'id' => '{id}']);
@@ -793,6 +876,9 @@ class table_sql extends moodle_table_sql {
             'customdata' => $customdata,
             'target' => $target,
             'class' => $class,
+            // Optionale Bestätigungs-Meldung, die in App.tsx vor dem onClick als window.confirm()
+            // gezeigt wird. Platzhalter {spaltenname} werden client-seitig aus row.original ersetzt.
+            'confirm_message' => $confirm_message,
         ];
     }
 
@@ -843,6 +929,18 @@ class table_sql extends moodle_table_sql {
 
     protected function add_full_text_search_column(string $column): void {
         $this->full_text_search_columns[] = $column;
+    }
+
+    protected function get_select_option_labels(string $column): array {
+        $labels = [];
+        foreach ($this->column_options[$column]['select_options'] as $key => $label) {
+            if (is_object($label) || is_array($label)) {
+                $label = (array)$label;
+                $label = $label['label'] ?? $label['text'] ?? '';
+            }
+            $labels[$key] = $label;
+        }
+        return $labels;
     }
 
     protected function get_row_actions(object $row): array {
@@ -960,7 +1058,7 @@ class table_sql extends moodle_table_sql {
         // override the default behavior to use the configured sql_column attribute
         $ret = [];
         foreach ($columns as $column => $sort) {
-            $ret[$this->get_sql_column($column)] = $sort;
+            $ret[$this->get_sql_column($column, true)] = $sort;
         }
 
         return $ret;
@@ -1028,6 +1126,12 @@ class table_sql extends moodle_table_sql {
         // Handle sensitive columns - always mask (display and export)
         if (!empty($this->column_options[$column]['sensitive'])) {
             return $this->mask_sensitive_value((string)($row->{$column} ?? ''));
+        }
+
+        // for columns with select_options, show label text instead of raw value
+        if ($this->column_options[$column]['select_options'] ?? null) {
+            $labels = $this->get_select_option_labels($column);
+            return s($labels[$value] ?? $value);
         }
 
         if (empty($this->column_options[$column]['internal']) && (!$this->is_downloading() || $this->export_class_instance()->supports_html())) {
@@ -1198,6 +1302,25 @@ class table_sql extends moodle_table_sql {
     }
 
     private function _out() {
+        // only export columns currently visible in the frontend (column toggle)
+        // this is only used for the download, the normal table output (xhr list) always contains all columns
+        $hiddencolumns = array_filter(explode(',', optional_param('hiddencolumns', '', PARAM_RAW)));
+        if ($hiddencolumns) {
+            $newcolumns = $this->columns;
+            $newheaders = $this->headers;
+            foreach ($hiddencolumns as $column) {
+                if (isset($newcolumns[$column])) {
+                    unset($newheaders[$newcolumns[$column]]);
+                    unset($newcolumns[$column]);
+                }
+            }
+            // safety: if everything was hidden, keep the original columns
+            if ($newcolumns) {
+                // renumber, so columns and headers stay in sync
+                $this->columns = array_flip(array_keys($newcolumns));
+                $this->headers = array_values($newheaders);
+            }
+        }
         parent::out($this->pagesize, null, '');
     }
 
@@ -1376,7 +1499,7 @@ class table_sql extends moodle_table_sql {
             return $this->column_options[$column]['data_type'];
         }
 
-        $sql_column = $this->get_sql_column($column);
+        $sql_column = $this->get_sql_column($column, false);
 
         $sql_column = explode('.', $sql_column);
         if (count($sql_column) >= 2) {
@@ -1429,16 +1552,34 @@ class table_sql extends moodle_table_sql {
         global $CFG;
 
         $json_output = function($data): void {
-            header('Cache-Control: private, must-revalidate, pre-check=0, post-check=0, max-age=0');
-            header('Pragma: no-cache');
-            header('Expires: ' . gmdate('D, d M Y H:i:s', 0) . ' GMT');
-            header("Content-Type: application/json\n");
+            // Output vor unserem JSON (entweder schon raus oder noch im output_buffering-Buffer)
+            // mit Marker trennen, damit der Client (tolerantJsonParse) ihn im Banner anzeigen kann.
+            $had_output = headers_sent();
+            if (!$had_output) {
+                foreach (ob_get_status(true) as $buf) {
+                    if (!empty($buf['buffer_used'])) {
+                        $had_output = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!headers_sent()) {
+                header('Cache-Control: private, must-revalidate, pre-check=0, post-check=0, max-age=0');
+                header('Pragma: no-cache');
+                header('Expires: ' . gmdate('D, d M Y H:i:s', 0) . ' GMT');
+                header("Content-Type: application/json\n");
+            }
 
             $ret = json_encode($data, JSON_UNESCAPED_SLASHES
                 | (optional_param('pretty', false, PARAM_BOOL) || (is_array($data) && !empty($data['type']) && $data['type'] == 'error') ? JSON_PRETTY_PRINT : 0));
 
             if ($ret === false) {
                 throw new \moodle_exception("json_encode failed: " . json_last_error_msg());
+            }
+
+            if ($had_output) {
+                echo "\n--TABLE_SQL_OUTPUT_MARKER--\n";
             }
 
             echo $ret;
@@ -1501,6 +1642,9 @@ class table_sql extends moodle_table_sql {
             $selected_rowids = array_unique($selected_rowids);
             $selected_rowids = array_values($selected_rowids);
 
+            // cap total selection
+            $selected_rowids = array_slice($selected_rowids, 0, static::SELECTION_MAX);
+
             $session_info = $this->get_session_info();
             $session_info->selected_rowids = $selected_rowids;
             $session_info->selection_last_changed = time();
@@ -1513,16 +1657,27 @@ class table_sql extends moodle_table_sql {
         }
 
         if ($action == 'select_all') {
+            global $DB;
+
             $session_info = $this->get_session_info();
 
+            $this->setup();
+            $this->currpage = 0;
+            $this->pagesize = static::SELECTION_MAX;
+            list($sql, $params) = $this->get_sql_and_params();
+            $rows = $DB->get_records_sql($sql, $params, 0, static::SELECTION_MAX);
+
             $selected_rowids = $session_info->selected_rowids;
-            foreach ($this->get_all_rows() as $row) {
+            foreach ($rows as $row) {
                 $selected_rowids[] = $row->id;
             }
 
             // remove duplicates, if added twice
             $selected_rowids = array_unique($selected_rowids);
             $selected_rowids = array_values($selected_rowids);
+
+            // cap total selection, in case prior session selections pushed us over
+            $selected_rowids = array_slice($selected_rowids, 0, static::SELECTION_MAX);
 
             $session_info->selected_rowids = $selected_rowids;
             $session_info->selection_last_changed = time();
@@ -1837,6 +1992,48 @@ class table_sql extends moodle_table_sql {
         return $row ?: null;
     }
 
+    /**
+     * Server-seitiges Sicherheitsnetz für die delete-Action.
+     *
+     * Der window.confirm im Client (App.tsx) fängt nur Klick-Events ab und wird z.B. bei
+     * "Rechtsklick -> Link in neuem Tab öffnen", deaktiviertem JS oder GET-Prefetch umgangen.
+     * Da Löschen destruktiv ist, muss die Bestätigung server-seitig abgesichert werden:
+     * Ohne confirm=1 wird Moodles Confirm-Seite gezeigt, der "Ja"-Button schickt erst mit
+     * gültigem sesskey zurück. Aufrufer ruft dies im delete-Zweig auf, bevor gelöscht wird.
+     */
+    public function require_delete_confirmation(): void {
+        global $OUTPUT, $PAGE;
+
+        if (optional_param('confirm', 0, PARAM_BOOL)) {
+            require_sesskey();
+            return;
+        }
+
+        $message = '';
+        foreach ($this->row_actions as $action) {
+            if ($action->type === 'delete' && $action->confirm_message) {
+                $message = $action->confirm_message;
+                break;
+            }
+        }
+
+        if ($message && $row = $this->get_row(required_param('id', PARAM_INT))) {
+            // Platzhalter {spaltenname} wie clientseitig (App.tsx) aus der Zeile ersetzen.
+            $message = preg_replace_callback('!\{(\w+)\}!', fn($m) => $row->{$m[1]} ?? '', $message);
+        } else {
+            $message = get_string('areyousure');
+        }
+
+        // Aktuelle Request-Parameter (GET + POST) übernehmen + confirm + sesskey.
+        $params = array_merge($_GET, $_POST, ['confirm' => 1, 'sesskey' => sesskey()]);
+        $confirmurl = new \moodle_url($PAGE->url->out_omit_querystring(), $params);
+
+        echo $OUTPUT->header();
+        echo $OUTPUT->confirm($message, $confirmurl, $this->baseurl);
+        echo $OUTPUT->footer();
+        exit;
+    }
+
     protected function render_detail_panel_content(object $row): string {
         return '';
     }
@@ -1859,7 +2056,7 @@ class table_sql extends moodle_table_sql {
         $orig_baseurl = $this->baseurl;
         $this->baseurl = new \moodle_url($orig_baseurl, ['uniqueid' => $this->uniqueid]);
 
-        $output = '<div class="table-sql-download-form-container">';
+        $output = '<div class="table-sql-download-form-container" style="display:none">';
         $output .= parent::download_buttons();
         $output .= '</div>';
 
